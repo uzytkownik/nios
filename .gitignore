@@ -1,0 +1,5 @@
+*.a
+*.o
+image
+nios
+nios.map
