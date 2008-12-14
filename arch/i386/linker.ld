@@ -1,50 +1,38 @@
 OUTPUT_FORMAT("elf32-i386")
 ENTRY(start)
 phys = 0x00100000;
+virt = 0x00000000;
 SECTIONS
 {
 	. = phys;
-	.text :
+	.setup :
 	{
-	      code = .;
-	      *(.text)
+		*(.setup)
 	}
+	. += virt;
 	. = ALIGN(0x1000);
-	.data :
-	{
-		data = .;
-		*(.data)
-	}
-	. = ALIGN(0x1000);
-	.bss :
-	{
-		bss = .;
-		*(COMMON)
-		*(.bss)
-	}
-	. = ALIGN(0x1000);
-	end = .;
-}
-/*SECTIONS
-{
-	.text phys : AT(phys)
+	.text : AT(ADDR(.text) - virt)
 	{
 		code = .;
+		phys_code = . - virt;
 		*(.text)
-		. = ALIGN(4096);
 	}
-	.data : AT(phys + (data - code))
+	. = ALIGN(0x1000);
+	.data : AT(ADDR(.data) - virt)
 	{
 		data = .;
+		phys_data = . - virt;
 		*(.data)
-		. = ALIGN(4096);
 	}
-	.bss : AT(phys + (bss - code))
+	. = ALIGN(0x1000);
+	.bss : AT(ADDR(.bss) - virt)
 	{
 		bss = .;
-		*(.bss)
+		phys_bss = . - virt;
 		*(COMMON)
-		. = ALIGN(4096);
+		*(.bss)
 	}
+	. = ALIGN(0x1000);
 	end = .;
-}*/
+	phys_end = . - virt;
+}

@@ -4,7 +4,7 @@
 #define page_directory (end)
 
 /* It is already aligned */
-extern unsigned int **end;
+unsigned int **end;
 
 void
 i386_mem_init ()
