@@ -39,12 +39,12 @@ hh_start:
 	.align 4
 	.globl start_gdt, start_gdt_start
 start_gdt:
-	.word 3
+	.word start_gdt_end - start_gdt_start - 1
 	.long start_gdt_start
 	.align 4
 start_gdt_start:
 	.byte 0x00, 0x00, 0, 0, 0, 0b00000000, 0b00000000, 0x00
-	.byte 0xFF, 0xFF, 0, 0, 0, 0b10011010, 0b11001111, 0x00
-	.byte 0xFF, 0xFF, 0, 0, 0, 0b10010010, 0b11001111, 0x00
+	/* Kernel */
+	.byte 0xFF, 0xFF, 0, 0, 0, 0b10011010, 0b11001111, 0x00 /* 0x08 */
+	.byte 0xFF, 0xFF, 0, 0, 0, 0b10010010, 0b11001111, 0x00 /* 0x10 */
 start_gdt_end:
-	
