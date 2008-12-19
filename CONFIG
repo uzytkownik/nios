@@ -1,1 +1,2 @@
 ARCH=i386
+DEBUG=1
