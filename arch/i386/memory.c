@@ -1,34 +1,16 @@
-#include "memory.h"
+#include <iapi/kernel/memory.h>
 
-/* simple rename */
-#define page_directory (end)
-
-/* It is already aligned */
-unsigned int **end;
+struct iapi_kernel_memory i386_memory;
 
 void
-i386_mem_init ()
+iapi_kernel_memory_init (int size, void **reserved)
 {
-  /* Clear the page directory */
-  for (int i = 0; i < 1024; i++)
-    {
-      page_directory[i] = 0;
-    }
-
-  /* Sets the first page table */
-  page_directory[0] = (unsigned int *)(page_directory + 0x1000);
-  for(unsigned int i = 0; i < 1024; i++)
-    {
-      page_directory[0][i] = i * 0x1000 | 3;
-    }
-  page_directory[0] = (unsigned int *)((unsigned int)page_directory[0] | 3);
-  
-  /* Enable pagging */
-  __asm__ volatile ("movl %%ebx, %%cr3\n"
-		    "\tmovl %%cr0, %%ebx\n"
-		    "\tor $0x80000000, %0\n"
-		    "\tmovl %%ebx, %%cr0"
-		    :
-		    : "b"(page_directory)
-		    : "0" );
+  iapi_new (&i386_memory.iapi, 0);
 }
+
+struct iapi_kernel_memory *
+iapi_kernel_memory_get_instance ()
+{
+  return &i386_memory;
+}
+
