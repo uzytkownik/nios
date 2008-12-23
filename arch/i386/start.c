@@ -7,7 +7,7 @@ kstart (unsigned long magic, unsigned long addr)
 
   reserved[0] = 0; //TODO: Handle it from multiboot
   
-  iapi_kernel_memory_init (0x02000000, reserved);
+  iapi_kernel_memory_init (0x02000000);
   
   while(1)
     __asm__("hlt");
