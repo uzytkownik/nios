@@ -149,6 +149,7 @@ kernel_mark_free (struct page *start, struct page *finish,
 {
   struct page *old_page;
   int sub_iter;
+  int offset;
   
   if (begin < start)
     {
@@ -195,6 +196,7 @@ kernel_mark_free (struct page *start, struct page *finish,
       old_page->prev = begin;
     }
 
+  offset = ((int)begin & 0x003FFFFF)/1024;
   sub_iter = finish - begin;
   while (sub_iter--)
     {
@@ -297,7 +299,7 @@ iapi_kernel_memory_init (int size)
     }
   
   iter = 0;
-  while (iter < (size/0x400000 - 1))
+  while (iter < size/0x400000)
     {
       kernel_page_table[iter] = (iter * 0x400000) | 0x01B;
       iter++;
@@ -316,6 +318,46 @@ iapi_kernel_memory_init (int size)
 			:
 			:
 			: "%eax");
+
+  if (size >= 0x1000000)
+    {
+      iter = 2;
+    }
+  else
+    {
+      iter = 1;
+    }
+  allocations[1023] = 0;
+  while (iter < size/0x400000)
+    {
+      struct kernel_page_header * header;
+      struct page *begin;
+      struct page *finish;
+      int subiter;
+      
+      header = (struct kernel_page_header *)(iter * 0x400000);
+      begin = (struct page *)(iter * 0x400000 + 0x1000);
+      finish = (struct page *)((iter + 1) * 0x400000 + 0x1000);
+
+      begin->next = allocations[1023];
+      if (allocations[1023] != 0)
+	{
+	  allocations[1023]->prev = begin;
+	}
+      allocations[1023] = begin;
+      
+      subiter = 0;
+      while (subiter < 1023)
+	{
+	  header->ref[subiter + 1] = 0;
+	  (begin + subiter)->begin = begin;
+	  (begin + subiter)->finish = finish;
+	  subiter++;
+	}
+      iter++;
+    }
+  allocations[1023]->prev = 0;
+  biggest_allocation = 1023;
 }
 
 struct iapi_kernel_memory *
