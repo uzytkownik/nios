@@ -4,14 +4,8 @@
 struct multiboot_memory_map
 {
   unsigned int size;
-  struct {
-    void *low;
-    void *high;
-  } addr;
-  struct {
-    unsigned int low;
-    unsigned int high;
-  } length;
+  unsigned long long addr;
+  unsigned long long length;
   unsigned int type;
 };
 
@@ -77,19 +71,19 @@ kstart (unsigned long magic, struct multiboot_info *info)
 
   usable_length = 0;
   mmap = info->mmap.addr;
-  while(usable_length < 64 && mmap < info->mmap.addr + info->mmap.length)
+  while(usable_length < 64 && (int)mmap < (int)info->mmap.addr + info->mmap.length)
     {
       if (mmap->type == 1)
 	{
-	  usable[usable_length] = mmap->addr.low;
-	  usable_lengths[usable_length] = mmap->length.low;
+	  usable[usable_length] = (void *)((unsigned int)mmap->addr);
+	  usable_lengths[usable_length] = (unsigned int)mmap->length;
+	  usable_length++;
 	}
       
-      usable_length++;
-      mmap = (struct multiboot_memory_map *)((unsigned int)mmap + mmap->size + 4);
+      mmap = (struct multiboot_memory_map *)((unsigned int)mmap + mmap->size + sizeof(unsigned int));
     }
   
-  iapi_kernel_memory_init (0x02000000, usable_length, usable, usable_lengths);
+  iapi_kernel_memory_init (usable_length, usable, usable_lengths);
   
   while(1)
     __asm__("hlt");
