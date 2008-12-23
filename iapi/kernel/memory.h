@@ -14,14 +14,16 @@ struct iapi_kernel_memory
 struct iapi_kernel_memory_pageset
 {
   struct iapi iapi;
-  int (*get_page_size)(struct iapi_kernel_memory_pageset *self);
-  void *(*allocate)(struct iapi_kernel_memory_pageset *self, void *where, int size);
+  unsigned int (*get_page_size)(struct iapi_kernel_memory_pageset *self);
+  void *(*allocate)(struct iapi_kernel_memory_pageset *self, void *where, unsigned int size);
   void *(*map)(struct iapi_kernel_memory_pageset *self, void *page, void *to);
-  void (*release)(struct iapi_kernel_memory_pageset *self, void *page, int size);
+  void (*release)(struct iapi_kernel_memory_pageset *self, void *page, unsigned int size);
   void *(*lookup)(struct iapi_kernel_memory_pageset *self, void *page);
 };
 
-void iapi_kernel_memory_init (int size);
+void iapi_kernel_memory_init (unsigned int size,
+			      unsigned int usable_length,
+			      void **usable, unsigned int *usable_lengths);
 struct iapi_kernel_memory *iapi_kernel_memory_get_instance ();
 struct iapi_kernel_memory_pageset *iapi_kernel_memory_get_kernel_pageset ();
 

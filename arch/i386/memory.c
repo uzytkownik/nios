@@ -58,7 +58,7 @@ struct page
 
 struct kernel_page_header
 {
-  int ref[1024];
+  unsigned int ref[1024];
 };
 
 
@@ -66,10 +66,10 @@ static struct iapi_kernel_memory i386_memory;
 static struct iapi_kernel_memory_pageset kernel_pageset;
 static unsigned long kernel_page_directory[1024] __attribute__ ((aligned (4096)));
 static unsigned long kernel_page_table[1024] __attribute__ ((aligned (4096)));
-static volatile int biggest_allocation;
+static volatile unsigned int biggest_allocation;
 static struct page *allocations[1024];
 
-static int
+static unsigned int
 kernel_get_page_size (struct iapi_kernel_memory_pageset *self)
 {
   return 4*1024;
@@ -77,13 +77,13 @@ kernel_get_page_size (struct iapi_kernel_memory_pageset *self)
 
 static void *
 kernel_allocate (struct iapi_kernel_memory_pageset *self,
-		 void *where, int size)
+		 void *where, unsigned int size)
 {
   struct page *page;
   struct kernel_page_header *header;
-  int bucket;
-  int offset;
-  int iter;
+  unsigned int bucket;
+  unsigned int offset;
+  unsigned int iter;
   
   if (where != (void *)-1)
     return 0;
@@ -100,7 +100,7 @@ kernel_allocate (struct iapi_kernel_memory_pageset *self,
     {
       struct page *new_page;
       struct page *old_page;
-      int iter;
+      unsigned int iter;
       
       page = allocations[biggest_allocation];
       bucket = biggest_allocation;
@@ -130,8 +130,8 @@ kernel_allocate (struct iapi_kernel_memory_pageset *self,
     }
   allocations[bucket] = page->next;
 
-  header = (struct kernel_page_header *)((int)page & 0xFFC00000);
-  offset = ((int)page & 0x003FFFFF)/1024;
+  header = (struct kernel_page_header *)((unsigned int)page & 0xFFC00000);
+  offset = ((unsigned int)page & 0x003FFFFF)/1024;
 
   iter = size - 1;
   while (iter--)
@@ -148,8 +148,8 @@ kernel_mark_free (struct page *start, struct page *finish,
 		  struct kernel_page_header *header)
 {
   struct page *old_page;
-  int sub_iter;
-  int offset;
+  unsigned int sub_iter;
+  unsigned int offset;
   
   if (begin < start)
     {
@@ -196,7 +196,7 @@ kernel_mark_free (struct page *start, struct page *finish,
       old_page->prev = begin;
     }
 
-  offset = ((int)begin & 0x003FFFFF)/1024;
+  offset = ((unsigned int)begin & 0x003FFFFF)/1024;
   sub_iter = finish - begin;
   while (sub_iter--)
     {
@@ -206,17 +206,18 @@ kernel_mark_free (struct page *start, struct page *finish,
 }
 
 static void
-kernel_release (struct iapi_kernel_memory_pageset *self, void *_page, int size)
+kernel_release (struct iapi_kernel_memory_pageset *self,
+		void *_page, unsigned int size)
 {
   struct page *page;
   struct page *begin;
   struct kernel_page_header *header;
-  int offset;
-  int iter;
+  unsigned int offset;
+  unsigned int iter;
 
   page = (struct page *)_page;
-  header = (struct kernel_page_header *)((int)page & 0xFFC00000);
-  offset = ((int)page & 0x003FFFFF)/1024;
+  header = (struct kernel_page_header *)((unsigned int)page & 0xFFC00000);
+  offset = ((unsigned int)page & 0x003FFFFF)/1024;
 
   if (offset > 1 && header->ref[offset - 1] == 0)
     {
@@ -277,9 +278,12 @@ kernel_map (struct iapi_kernel_memory_pageset *self, void *page, void *to)
 }
 
 void
-iapi_kernel_memory_init (int size)
+iapi_kernel_memory_init (unsigned int size,
+			 unsigned int usable_length,
+			 void **usable, unsigned int *usable_lengths)
 {
-  int iter;
+  unsigned int iter;
+  unsigned int ksize;
   
   iapi_new (&i386_memory.iapi, 0);
   i386_memory.create_pageset = 0;
@@ -291,7 +295,7 @@ iapi_kernel_memory_init (int size)
   kernel_pageset.release = kernel_release;
   kernel_pageset.lookup = kernel_lookup;
 
-  kernel_page_directory[0] = (int)&kernel_page_table | 0x08B;
+  kernel_page_directory[0] = (unsigned int)&kernel_page_table | 0x08B;
   iter = 0;
   while (iter < 1024)
     {
@@ -319,45 +323,102 @@ iapi_kernel_memory_init (int size)
 			:
 			: "%eax");
 
+  iter = 1024;
+  while(iter--)
+    allocations[iter] = 0;
+  
   if (size >= 0x1000000)
     {
-      iter = 2;
+      ksize = 0x0800000;
     }
   else
     {
-      iter = 1;
+      ksize = 0x0400000;
     }
-  allocations[1023] = 0;
-  while (iter < size/0x400000)
-    {
-      struct kernel_page_header * header;
-      struct page *begin;
-      struct page *finish;
-      int subiter;
-      
-      header = (struct kernel_page_header *)(iter * 0x400000);
-      begin = (struct page *)(iter * 0x400000 + 0x1000);
-      finish = (struct page *)((iter + 1) * 0x400000 + 0x1000);
 
-      begin->next = allocations[1023];
-      if (allocations[1023] != 0)
+  iter = 0;
+  while (iter < usable_length)
+    {
+      int subiter;
+      if ((unsigned int)usable[iter] < ksize)
 	{
-	  allocations[1023]->prev = begin;
+	  if (usable_lengths[iter] < (ksize - (unsigned int)usable[iter]))
+	    {
+	      iter++;
+	      continue;
+	    }
+
+	  usable_lengths[iter] -= ksize - (unsigned int)usable[iter];
+	  usable[iter] = (void *)ksize;
 	}
-      allocations[1023] = begin;
-      
+
+      if (((unsigned int)usable[iter] & (0x003FFFFF)) != 0)
+	{
+	  unsigned int rem;
+
+	  rem = (unsigned int)usable[iter] & (0x003FFFFF);
+
+	  if (rem > usable_lengths[iter])
+	    {
+	      iter++;
+	      continue;
+	    }
+	  
+	  usable[iter] = (void *)((unsigned int)usable[iter] & 0xFFC00000) + 0x00400000;
+	  usable_lengths[iter] -= rem;
+	}
+
+      if (((unsigned int)usable_lengths[iter] & (0x003FFFFF)) != 0)
+	{
+	  usable_lengths[iter] &= 0xFFC00000;
+
+	  if (usable_lengths[iter] == 0)
+	    {
+	      iter++;
+	      continue;
+	    }
+	}
+
       subiter = 0;
-      while (subiter < 1023)
+      while (subiter < usable_lengths[iter])
 	{
-	  header->ref[subiter + 1] = 0;
-	  (begin + subiter)->begin = begin;
-	  (begin + subiter)->finish = finish;
-	  subiter++;
+	  int subsubiter;
+	  struct kernel_page_header *hdr;
+	  struct page *begin;
+	  struct page *finish;
+	  struct page *old_page;
+	  
+	  hdr = ((struct kernel_page_header *)((int)usable[iter] + subiter));
+	  begin  = (struct page *)((int)hdr + 0x00001000);
+	  finish = (struct page *)((int)hdr + 0x00400000);
+	  
+	  subsubiter = 1;
+	  while (subsubiter < 1024)
+	    {
+	      struct page *page;
+	      
+	      hdr->ref[subsubiter] = 0;
+	      page = (struct page *)((int)hdr + subsubiter*0x00001000);
+	      page->begin = begin;
+	      page->finish = finish;
+
+	      subsubiter++;
+	    }
+
+	  old_page = allocations[1023];
+	  allocations[1023] = begin;
+
+	  begin->next = old_page;
+	  
+	  if (old_page != 0)
+	    old_page->prev = begin;
+	  
+	  subiter += 0x00400000;
 	}
+      
       iter++;
     }
   allocations[1023]->prev = 0;
-  biggest_allocation = 1023;
 }
 
 struct iapi_kernel_memory *
