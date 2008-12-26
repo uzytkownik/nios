@@ -83,7 +83,7 @@ kstart (unsigned long magic, struct multiboot_info *info)
       mmap = (struct multiboot_memory_map *)((unsigned int)mmap + mmap->size + sizeof(unsigned int));
     }
   
-  iapi_kernel_memory_init (usable_length, usable, usable_lengths);
+  //iapi_kernel_memory_init (usable_length, usable, usable_lengths);
   
   while(1)
     __asm__("hlt");
