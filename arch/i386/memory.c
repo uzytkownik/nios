@@ -11,10 +11,16 @@ struct free_page
   hwpointer page;
 };
 
+struct page_block
+{
+  volatile unsigned short ref[2048];
+};
+
 #pragma pack()
 
 volatile struct free_page *fpages;
 volatile struct free_page *free_fpages;
+struct page_block **page_blocks;
 
 static hwpointer
 kernel_memory_allocate (struct iapi_kernel_memory *memory)
@@ -39,11 +45,20 @@ kernel_memory_allocate (struct iapi_kernel_memory *memory)
 	      hwpointer ptr;
 	      
 	      ptr = page->page;
+	      page->page = HWNULL;
 	      
 	      page->next = free_fpages;
 	      ATOMIC_XCMP (&free_fpages, page->next, page, old_page);
 	      if (page->next == old_page)
 		{
+		  int block;
+		  int off;
+
+		  block = ptr/2048;
+		  off = ptr % 2048;
+
+		  ATOMIC_SSET (&page_blocks[block]->ref[off], 1);
+		  
 		  return ptr;
 		}
 	    }
@@ -54,4 +69,3 @@ kernel_memory_allocate (struct iapi_kernel_memory *memory)
 
   return HWNULL;
 }
-
