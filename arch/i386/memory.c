@@ -1,71 +1,46 @@
 #include <iapi/kernel/memory.h>
 #include <atomic.h>
-
-#pragma pack(1)
+#include <linkedlist.h>
 
 #define PAGE_SIZE 4096
+#define PAGE_BLOCK_SIZE 2048
 
-struct free_page
-{
-  struct free_page *next;
-  hwpointer page;
-};
+STACK(free_pages, hwpointer page);
 
 struct page_block
 {
   volatile unsigned short ref[2048];
 };
 
-#pragma pack()
+static struct free_pages free_pages;
+static struct free_pages free_pages_aval;
+static struct page_block **page_blocks;
 
-volatile struct free_page *fpages;
-volatile struct free_page *free_fpages;
-struct page_block **page_blocks;
-
-static hwpointer
+hwpointer
 kernel_memory_allocate (struct iapi_kernel_memory *memory)
 {
-  /*
-   * TODO: Check if it is much slower then in assembler
-   */
-  struct free_page *page;
-  struct free_page *old_page;
+  struct free_pages_node *node;
 
-  ATOMIC_GET (&fpages, page);
-  while (page != NULL)
+  STACK_POP (free_pages, node);
+
+  if (node != NULL)
     {
-      struct free_page *next;
+      hwpointer ptr;
+      int block;
+      int offset;
+      
+      ptr = node->page;
+      node->page = HWNULL;
+      
+      STACK_PUSH (free_pages_aval, node);
 
-      next = page->next;
-      ATOMIC_XCMP (&fpages, page, next, old_page);
-      if (page == old_page)
-	{
-	  do
-	    {
-	      hwpointer ptr;
-	      
-	      ptr = page->page;
-	      page->page = HWNULL;
-	      
-	      page->next = free_fpages;
-	      ATOMIC_XCMP (&free_fpages, page->next, page, old_page);
-	      if (page->next == old_page)
-		{
-		  int block;
-		  int off;
+      block = ptr/PAGE_BLOCK_SIZE;
+      offset = ptr % PAGE_BLOCK_SIZE;
 
-		  block = ptr/2048;
-		  off = ptr % 2048;
-
-		  ATOMIC_SSET (&page_blocks[block]->ref[off], 1);
-		  
-		  return ptr;
-		}
-	    }
-	  while (1);
-	}
-      page = old_page;
+      ATOMIC_SET (&page_blocks[block]->ref[offset], 1);
+      
+      return ptr;
     }
-
-  return HWNULL;
+    return HWNULL;
 }
+
