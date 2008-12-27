@@ -38,7 +38,7 @@ struct multiboot_info
     unsigned int length;
     void *address;
   } modules;
-  char padding[4];
+  char padding[16];
   struct {
     unsigned int length;
     struct multiboot_memory_map *addr;
