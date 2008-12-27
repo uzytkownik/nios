@@ -25,7 +25,7 @@ struct iapi_kernel_memory_pageset
   hwpointer (*lookup)(struct iapi_kernel_memory_pageset *self, vpointer page);
 };
 
-void iapi_kernel_memory_init (void **usable, unsigned int *usable_lengths);
+void iapi_kernel_memory_init (hwpointer *usable, unsigned int *usable_lengths);
 struct iapi_kernel_memory *iapi_kernel_memory_get_instance ();
 struct iapi_kernel_memory_pageset *iapi_kernel_memory_get_kernel_pageset ();
 
