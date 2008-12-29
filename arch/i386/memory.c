@@ -12,8 +12,8 @@ struct page_block
   volatile unsigned short ref[PAGE_BLOCK_SIZE];
 };
 
-static struct free_pages free_pages;
-static struct free_pages free_pages_aval;
+static struct free_pages   free_pages;
+static struct free_pages   free_pages_aval;
 static struct page_block **page_blocks;
 
 hwpointer
@@ -30,7 +30,7 @@ kernel_memory_allocate (struct iapi_kernel_memory *memory)
       int offset;
       
       ptr = node->page;
-      node->page = HWNULL;
+      node->page = HWINV;
       
       STACK_PUSH (free_pages_aval, node);
 
@@ -44,67 +44,112 @@ kernel_memory_allocate (struct iapi_kernel_memory *memory)
     return HWNULL;
 }
 
-/* We can map first 8 MiB without allocation */
-#define BOOTUP_BLOCK 1
-static struct free_pages_node fpn_start[BOOTUP_BLOCK * PAGE_BLOCK_SIZE];
-static struct page_block first_block[BOOTUP_BLOCK];
-/*
- * We can map systems without PAE without problems.
- * Please note that the memory will be reserved in BOOTUP_BLOCKS chunks.
- */
-#define BOOTUP_BLOCKS_PAGES 1
-#define BLOCKS_PER_PAGE (PAGE_SIZE/sizeof(struct page_block *))
-#define BOOTUP_BLOCKS (BOOTUP_BLOCKS_PAGES*BLOCKS_PER_PAGE)
-static struct page_block *bootup_blocks[BOOTUP_BLOCKS];
-
-/*
- * First phase of memory subsystem initialization
- * The goal is to initalize everything that can be achived without need
- * od dynamic allocation of functions
- */
-static unsigned int
-free_memory_init_1 (hwpointer start, unsigned int length)
-{
-  hwpointer pmax;
-  unsigned int iter;
-
-  if (length > PAGE_SIZE * BOOTUP_BLOCK * PAGE_BLOCK_SIZE)
-    length = PAGE_SIZE * BOOTUP_BLOCK * PAGE_BLOCK_SIZE;
-
-  pmax = start;
-  iter = 0;
-  while (pmax < start + length)
-    {
-      fpn_start[iter].page = pmax;
-      fpn_start[iter].next = &fpn_start[iter + 1];
-      
-      iter++;
-      pmax += PAGE_SIZE;
-    }
-  fpn_start[iter - 1].next = 0;
-  free_pages.head = &fpn_start[0];
-
-  if (iter < BOOTUP_BLOCK * PAGE_BLOCK_SIZE)
-    {
-      free_pages_aval.head = &fpn_start[iter];
-      while (iter < BOOTUP_BLOCK * PAGE_BLOCK_SIZE)
-	{
-	  fpn_start[iter].page = HWNULL;
-	  fpn_start[iter].next = &fpn_start[iter + 1];
-	  iter++;
-	}
-      fpn_start[BOOTUP_BLOCK * PAGE_BLOCK_SIZE - 1].next = NULL;
-    }
-  else
-    {
-      free_pages_aval.head = NULL;
-    }
-
-  return length;
-}
-
 void
-iapi_kernel_memory_init (hwpointer *usable, unsigned int *usable_lengths)
+iapi_kernel_memory_init (unsigned int size,
+			 hwpointer *usable,
+			 unsigned int *usable_lengths)
 {
+  unsigned int free_pages_n;
+  unsigned int page_blocks_n;
+  unsigned int page_blocks_assign;
+  hwpointer *hiter;
+  hwpointer piter;
+  unsigned int fpiter;
+  hwpointer first_free_page;
   
+  free_pages_n = size*sizeof(struct free_pages_node *)/(PAGE_SIZE*PAGE_SIZE);
+  page_blocks_n = size/PAGE_BLOCK_SIZE;
+
+  page_blocks = NULL;
+  
+  hiter = usable;
+  first_free_page = 0;
+  page_blocks_assign = 0;
+  while (*usable_lengths)
+    {
+      hwpointer page;
+
+      page = *usable;
+      while (page < *usable + *usable_lengths)
+	{
+	  if (free_pages_n != 0)
+	    {
+	      unsigned int iter;
+
+	      iter = 0;
+	      while (iter < PAGE_SIZE/sizeof(struct free_pages_node *))
+		{
+		  struct free_pages_node *node;
+
+		  node = (void *)(page + sizeof(struct free_pages_node *)*iter);
+
+		  node->next = free_pages_aval.head;
+		  free_pages_aval.head = node;
+		  
+		  node->page = HWINV;		  
+		  
+		  iter++;
+		}
+	      
+	      free_pages_n--;
+	    }
+	  else if (page_blocks == NULL)
+	    {
+	      unsigned int iter;
+	      
+	      page_blocks = (vpointer)page;
+
+	      iter = 0;
+	      while (iter < PAGE_SIZE/sizeof(struct page_block *))
+		{
+		  page_blocks[iter] = NULL;
+		  iter++;
+		}	      
+	    }
+	  else if (page_blocks_n != 0)
+	    {
+	      page_blocks[page_blocks_assign] = page;
+	      page_blocks_n--;
+	    }
+	  else
+	    {
+	      struct free_pages_node *node;
+	      
+	      if (first_free_page == 0)
+		{
+		  first_free_page = page;
+		}
+
+	      node = free_pages_aval.head;
+	      free_pages_aval.head = node->next;
+
+	      node->page = page;
+	    }
+
+	  page += PAGE_SIZE;
+	}
+      
+      usable++;
+      usable_lengths++;
+    }
+
+  piter = 0;
+  while (piter < size)
+    {
+      int block;
+      int off;
+
+      block = piter / PAGE_BLOCK_SIZE;
+      off = piter % PAGE_BLOCK_SIZE;
+      
+      if (piter < first_free_page)
+	{
+	  page_blocks[block]->ref[off] = 1;
+	}
+      else
+	{
+	  page_blocks[block]->ref[off] = 0;
+	}
+      piter += PAGE_SIZE;
+    }
 }

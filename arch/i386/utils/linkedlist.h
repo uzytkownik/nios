@@ -13,33 +13,25 @@
   };
 
 #define STACK_POP(stack, node)						\
-  do									\
-    {									\
-      __asm__ __volatile__ ("\n"					\
-			    "1:\n"					\
-			    "\ttest %%eax, %%eax\n"			\
-			    "\tjz 1f\n"					\
-			    "\tmov (%%eax), %%ecx\n"			\
-			    "\tlock cmpxchg %%ecx, %0\n"		\
-			    "\tjnz 1b\n"				\
-			    "1:"					\
-			    : "=m"(stack.head), "=a" (node)		\
-			    : "m"(stack.head), "a" (stack.head)		\
-			    : "%ecx" );					\
-    }									\
-  while(0)
+  __asm__ __volatile__ ("\n"						\
+			"1:\n"						\
+			"\ttest %%eax, %%eax\n"				\
+			"\tjz 1f\n"					\
+			"\tmov (%%eax), %%ecx\n"			\
+			"\tlock cmpxchg %%ecx, %0\n"			\
+			"\tjnz 1b\n"					\
+			"1:"						\
+			: "=m"(stack.head), "=a" (node)			\
+			: "m"(stack.head), "a" (stack.head)		\
+			: "%ecx" );
 #define STACK_PUSH(stack, node)						\
-  do									\
-    {									\
-      __asm__ __volatile__ ("\n"					\
-			    "1:\n"					\
-			    "\tmov %%eax, (%%ebx)\n"			\
-			    "\tlock cmpxchg %%ebx, %0\n"		\
-			    "\tjnz 1b\t"				\
-			    : "=m"(stack.head), "=m"(node->next)	\
-			    : "m" (stack.head), "b"(node),		\
-			      "a" (stack.head));			\
-    }									\
-  while(0)
+ __asm__ __volatile__ ("\n"						\
+		       "1:\n"						\
+		       "\tmov %%eax, (%%ebx)\n"				\
+		       "\tlock cmpxchg %%ebx, %0\n"			\
+		       "\tjnz 1b\t"					\
+		       : "=m"(stack.head), "=m"(node->next)		\
+		       : "m" (stack.head), "b"(node),			\
+		       "a" (stack.head));				\
 
 #endif
