@@ -6,7 +6,7 @@
 #define HWNULL 0LL
 #define HWINV -1LL
 
-typedef void *vpointer;
-typedef unsigned long long hwpointer;
+typedef unsigned long vpointer;
+typedef unsigned long hwpointer;
 
 #endif

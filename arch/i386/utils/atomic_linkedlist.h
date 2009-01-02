@@ -33,5 +33,5 @@
 		       : "=m"((stack).head), "=m"((node)->next)		\
 		       : "m" ((stack).head), "b"((node)),		\
 		       "a" ((stack).head));			       
-    
+
 #endif
