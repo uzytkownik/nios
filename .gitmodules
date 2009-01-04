@@ -1,0 +1,3 @@
+[submodule "liballoc"]
+	path = liballoc
+	url = http://git.smk.co.za/liballoc.git

@@ -1,8 +1,8 @@
 #ifndef LIBK_TREE
 #define LIBK_TREE
 
-#define RB_TREE_RED 0
-#define RB_TREE_BLACK 1
+#define RB_TREE_RED 1
+#define RB_TREE_BLACK 0
 
 #define RB_TREE(name, data)			\
   struct name ## _node				\
@@ -11,7 +11,6 @@
     struct name ## _node *right;		\
     struct name ## _node *prev;			\
     struct name ## _node *next;			\
-    struct name ## _node *parent;		\
     unsigned char color;			\
     data;					\
   };						\
@@ -24,9 +23,6 @@ struct libk_rb_tree_node
 {						
   struct libk_rb_tree_node *left;
   struct libk_rb_tree_node *right;
-  struct libk_rb_tree_node *prev;
-  struct libk_rb_tree_node *next;
-  struct libk_rb_tree_node *parent;
   unsigned char color;
 };
 
@@ -35,234 +31,229 @@ struct libk_rb_tree
   struct libk_rb_tree_node *head;
 };
 
-static struct libk_rb_tree_node *
-_libk_rb_tree_lookup (struct libk_rb_tree_node *node,
-		      struct libk_rb_tree_node **iter,
-		      int (*compare)(struct libk_rb_tree_node *a,
-				     void *user_data),
-		      void *user_data)
-{
-  int res;
-  
-  if (node == NULL)
-    return NULL;
+typedef int (*libk_rb_tree_compare)(struct libk_rb_tree_node *node,
+				    void *data);
+typedef int (*libk_rb_tree_compare_node)(struct libk_rb_tree_node *a,
+					 struct libk_rb_tree_node *b);
 
-  if (iter != NULL)
-    *iter = node;
-  
-  res = compare (node, user_data);
-  return (res == 0) ? node
-                    : _libk_rb_tree_lookup((res < 0) ? node->left
-					             : node->right,
-					   iter, compare, user_data);
-}
+#define RB_TREE_LOOKUP(tree, iter, compare, user_data) \
+  _libk_rb_tree_lookup ((tree)->head, (iter), (compare), (user_data))
+#define RB_TREE_INSERT(tree, node, compare) \
+  _libk_rb_tree_insert ((tree)->head, (node), NULL, NULL, (compare))
+#define RB_TREE_REMOVE(tree, compare, user_data) \
+  libk_rb_tree_true_remove ((tree), (compare), (user_data))
 
-static void
-_libk_rb_tree_rotate_right (struct libk_rb_tree_node *node)
-{
-  struct libk_rb_tree_node *q, *p, *b, *c, *pp;
-
-  pp = node->parent;
-  q = node;
-  p = node->left;
-  b = p->right;
-  c = q->right;
-  
-  if(pp)
-    {
-      if (pp->left = q)
-	pp->left = p;
-      else
-	pp->right = p;
-    }
-  p->parent = pp;
-  q->parent = p;
-  p->right = q;
-  if (b)
-    b->parent = q;
-  q->left = b;
-  if (c)
-    c->parent = q;
-  q->right = c;
-}
-
-static void
+static inline struct libk_rb_tree_node *
 _libk_rb_tree_rotate_left (struct libk_rb_tree_node *node)
 {
-  struct libk_rb_tree_node *q, *p, *b, *c, *pp;
+  struct libk_rb_tree_node *nnode;
 
-  pp = q->parent;
-  q = node->right;
-  p = node;
-  b = q->left;
-  c = q->right;
+  nnode = node->right;
+  node->right = nnode->left;
+  nnode->left = node;
+  nnode->color = node->color;
+  node->color = RB_TREE_RED;
 
-  if(pp)
-    {
-      if (pp->left = p)
-	pp->left = q;
-      else
-	pp->right = q;
-    }
-  if (b)
-    b->parent = p;
-  p->right = b;
-  p->parent = q;
-  q->left = p;
-  if (c)
-    c->parent = q;
-  q->right = c;
+  return nnode;
 }
 
-static void
-_libk_rb_tree_insert_balance (struct libk_rb_tree_node *node)
+static inline struct libk_rb_tree_node *
+_libk_rb_tree_rotate_right (struct libk_rb_tree_node *node)
 {
-  struct libk_rb_tree_node *uncle;
-  struct libk_rb_tree_node *parent;
-  struct libk_rb_tree_node *grandparent;
-  
-  parent = node->parent;
-  if (parent)
+  struct libk_rb_tree_node *nnode;
+
+  nnode = node->left;
+  node->left = nnode->right;
+  nnode->right = node;
+  nnode->color = node->color;
+  node->color = RB_TREE_RED;
+
+  return nnode;
+}
+
+static inline
+_libk_rb_tree_flip_color (struct libk_rb_tree_node *node)
+{
+  node->color = !node->color;
+  node->left->color = !node->left->color;
+  node->right->color = !node->right->color;
+}
+
+static inline struct libk_rb_tree_node *
+_libk_rb_tree_lookup (struct libk_rb_tree_node *head,
+		      struct libk_rb_tree_node **iter,
+		      libk_rb_tree_compare compare,
+		      void *data)
+{
+  struct libk_rb_tree_node *_iter;
+
+  if (iter == NULL)
+    iter = &_iter;
+
+  iter = head;
+  while (*iter)
     {
-      grandparent = node->parent->parent;
-      if (grandparent)
-	{
-	  if (parent == grandparent->left)
-	    uncle = grandparent->right;
-	  else
-	    uncle = grandparent->left;
-	}
+      int cmp;
+
+      cmp = compare(*iter, data);
+      if (cmp == 0)
+	return *iter;
+      else if (cmp < 0)
+	*iter = (*iter)->left;
+      else
+	*iter = (*iter)->right;
     }
   
-  if (parent == NULL)
+  return NULL;
+}
+
+#define _LIBK_RB_IS_RED(n) ((n) && (n)->color)
+
+static inline void
+_libk_rb_tree_fix (struct libk_rb_tree_node *head)
+{
+ if (_LIBK_RB_IS_RED (head->right) && !_LIBK_RB_IS_RED (head->left))
+   head = _libk_rb_tree_rotate_left (head);
+ if (!_LIBK_RB_IS_RED (head->right) && _LIBK_RB_IS_RED (head->left))
+   head = _libk_rb_tree_rotate_right (head);
+}
+
+static inline struct libk_rb_tree_node *
+_libk_rb_tree_insert (struct libk_rb_tree_node *head,
+		      struct libk_rb_tree_node *node,
+		      struct libk_rb_tree_node *prev,
+		      struct libk_rb_tree_node *next,
+		      libk_rb_tree_compare_node compare)
+{
+  int cmp;
+  
+  if (head == NULL)
     {
-      node->color = RB_TREE_BLACK;
-    }
-  else if (parent->color == RB_TREE_BLACK)
-    {
+      node->prev = prev;
+      node->next = next;
+      if (prev)
+	prev->next = node;
+      if (next)
+	next->prev = node;
       node->color = RB_TREE_RED;
+      return node;
     }
-  else if (uncle && uncle->color == RB_TREE_RED)
+
+  if (_LIBK_RB_IS_RED (head->left) && _LIBK_RB_IS_RED (head->right))
+    _libk_rb_tree_flip_color (head);
+
+  cmp = compare (node, head);
+  if (cmp < 0)
+    head->left = _libk_rb_tree_insert (head->left, node, prev, head, compare);
+  else
+    head->right = _libk_rb_tree_insert (head->right, node, head, next, compare);
+
+  _libk_rb_tree_fix (head);
+  
+  return head;
+}
+
+static inline struct libk_rb_tree_node *
+_libk_rb_tree_move_red_left (struct libk_rb_tree_node *node)
+{
+  _libk_rb_tree_flip_color (node);
+  if (_LIBK_RB_IS_RED (node->right->left))
     {
-      parent->color = RB_TREE_BLACK;
-      uncle->color = RB_TREE_BLACK;
-      grandparent->color = RB_TREE_RED;
-      _libk_rb_tree_insert_balance (grandparent);
+      node->right = _libk_rb_tree_rotate_right (node->right);
+      node = _libk_rb_tree_rotate_left (node);
+      _libk_rb_tree_flip_color (node);
+    }
+  return node;
+}
+
+static inline struct libk_rb_tree_node *
+_libk_rb_tree_move_red_right (struct libk_rb_tree_node *node)
+{
+  _libk_rb_tree_flip_color (node);
+  if (_LIBK_RB_IS_RED (node->left->left))
+    {
+      node = _libk_rb_tree_rotate_right (node);
+      _libk_rb_tree_flip_color (node);
+    }
+  return node;
+}
+
+static inline struct libk_rb_tree_node *
+_libk_rb_tree_remove_min_tmp (struct libk_rb_tree_node *node,
+			      struct libk_rb_tree_node **removed)
+{
+  if (node->left == NULL)
+    {
+      *removed = node;
+      return NULL;
+    }
+
+  if (!_LIBK_RB_IS_RED (node->left) && !_LIBK_RB_IS_RED(node->left->left))
+    node = _libk_rb_tree_move_red_left (node);
+
+  node->left = _libk_rb_tree_remove_min_tmp(node->left, removed);
+
+  return _libk_rb_tree_fix (node);
+}
+
+static inline struct libk_rb_tree_node *
+_libk_rb_tree_true_remove (struct libk_rb_tree *tree,
+			   libk_rb_tree_compare compare,
+			   void *user_data)
+{
+  struct libk_rb_tree_node *removed;
+
+  _libk_rb_tree_remove (tree->head, &removed, compare, user_data);
+
+  return removed;
+}
+
+static inline struct libk_rb_tree_node *
+_libk_rb_tree_remove (struct libk_rb_tree_node *node,
+		      struct libk_rb_tree_node **removed,
+		      libk_rb_tree_compare compare,
+		      void *user_data)
+{
+  if (compare (node, user_data) < 0)
+    {
+      if (!_LIBK_RB_IS_RED (node->left) && !_LIBK_RB_IS_RED(node->left->left))
+	node = _libk_rb_tree_move_red_left (node);
+      node->left = _libk_rb_tree_remove (node->left, removed,
+					 compare, user_data);
     }
   else
     {
-      if (node == parent->right && parent == grandparent->left)
+      if (_LIBK_RB_IS_RED (node->left))
+	node = _libk_rb_tree_rotate_right (node);
+      if (compare (node, user_data) == 0 && (node->right))
 	{
-	  _libk_rb_tree_rotate_left(parent);
-	  parent = node;
-	  uncle = node->right;
-	  node = node->left;
+	  *removed = node;
+	  return NULL;
 	}
-      else if (node == parent->left && parent == grandparent->right)
+      if (!_LIBK_RB_IS_RED (node->right) &&
+	  !_LIBK_RB_IS_RED(node->right->left))
+	node = _libk_rb_tree_move_red_right (node);
+      if (compare (node, user_data) == 0)
 	{
-	  _libk_rb_tree_rotate_right (parent);
-	  parent = node;
-	  uncle = node->left;
-	  node = node->right;
-	}
+	  struct libk_rb_tree_node *nright;
 
-      parent->color = RB_TREE_BLACK;
-      grandparent->color = RB_TREE_RED;
-      if ((node == parent->left) && (parent == grandparent->left))
-	{
-	  _libk_rb_tree_rotate_right (grandparent);
+	  *removed = node;
+	  
+	  nright = _libk_rb_tree_remove_min_tmp (node->right, &node);
+	  node->left = (*removed)->left;
+	  node->right = nright;
+	  node->color = (*removed)->color;
+
+	  node->prev = (*removed)->prev;
+	  if ((*removed)->prev)
+	    (*removed)->prev->next = node;
 	}
       else
-	{
-	  _libk_rb_tree_rotate_left (grandparent);
-	}
+	node->right = _libk_rb_tree_remove(node->right, removed,
+					   compare, user_data);
     }
+
+  return _libk_rb_tree_fix (node);
 }
 
-static void
-_libk_rb_tree_insert (struct libk_rb_tree_node *node,
-		      struct libk_rb_tree_node **place,
-		      struct libk_rb_tree_node *parent,
-		      int (*compare)(struct libk_rb_tree_node *a,
-				     struct libk_rb_tree_node *b))
-{
-  struct libk_rb_tree_node **nuncle;
-
-  if (*place != NULL)
-    {
-      int branch;
-      struct libk_rb_tree_node **nplace;
-      branch = compare (parent, node);
-      if (branch < 0)
-	{
-	  nplace = &parent->left;
-	}
-      else
-	{
-	  nplace = &parent->right;
-	}
-      _libk_rb_tree_insert(node, nplace, *place, compare);
-    }
-  else
-    {
-      int branch;
-      *place = node;
-      node->parent = parent;
-      if (branch < 0)
-	{
-	  node->next = parent;
-	  if (parent)
-	    {
-	      node->prev = parent->prev;
-	      if (parent->prev)
-		{
-		  parent->prev->next = node;
-		}
-	      parent->prev = node;
-	    }
-	}
-      else
-	{
-	  node->prev = parent;
-	  if (parent)
-	    {
-	      node->next = parent->next;
-	      if (parent->next)
-		{
-		  parent->next->prev = node;
-		}
-	      parent->next = node;
-	    }
-	}
-      _libk_rb_tree_insert_balance (node);
-    }
-};
-
-static struct libk_rb_tree_node *
-_libk_rb_tree_remove (struct libk_rb_tree_node **node,
-		      int (*compare)(struct libk_rb_tree_node *a,
-				     void *user_data))
-{
-  /* TODO: Implement */
-}
-
-#define RB_TREE_LOOKUP(tree, iter, compare, user_data)			\
-  _libk_rb_tree_lookup ((struct libk_rb_tree_node *)(tree)->head,	\
-			(struct libk_rb_tree_node **)(iter),		\
-			(int (*)(struct libk_rb_tree_node *,		\
-				 void *))(compare),			\
-			(void *)(user_data))
-#define RB_TREE_INSERT(tree, node, compare)				\
-  _libk_rb_tree_insert ((struct libk_rb_tree_node *)(node),		\
-			(struct libk_rb_tree_node **)&(tree)->head,	\
-			NULL,						\
-			(int (*)(struct libk_rb_tree_node *,		\
-				 struct libk_rb_tree_node *))		\
-			(compare))
-#define RB_TREE_REMOVE(tree, compare, user_data)			\
-  _libk_rb_tree_remove ((struct libk_rb_tree_node **)&(tree)->head,	\
-			(int (*)(struct libk_rb_tree_node *,		\
-				 void *))				\
-			(compare), (user_data))
- 
 #endif
