@@ -23,6 +23,8 @@ struct libk_rb_tree_node
 {						
   struct libk_rb_tree_node *left;
   struct libk_rb_tree_node *right;
+  struct libk_rb_tree_node *prev;
+  struct libk_rb_tree_node *next;
   unsigned char color;
 };
 
@@ -36,12 +38,19 @@ typedef int (*libk_rb_tree_compare)(struct libk_rb_tree_node *node,
 typedef int (*libk_rb_tree_compare_node)(struct libk_rb_tree_node *a,
 					 struct libk_rb_tree_node *b);
 
-#define RB_TREE_LOOKUP(tree, iter, compare, user_data) \
-  _libk_rb_tree_lookup ((tree)->head, (iter), (compare), (user_data))
-#define RB_TREE_INSERT(tree, node, compare) \
-  _libk_rb_tree_insert ((tree)->head, (node), NULL, NULL, (compare))
-#define RB_TREE_REMOVE(tree, compare, user_data) \
-  libk_rb_tree_true_remove ((tree), (compare), (user_data))
+#define RB_TREE_LOOKUP(tree, iter, compare, user_data)			\
+  _libk_rb_tree_lookup ((struct libk_rb_tree_node *)(tree)->head,	\
+			(struct libk_rb_tree_node *)(iter),		\
+			(libk_rb_tree_compare)(compare),		\
+			(void *)(user_data))
+#define RB_TREE_INSERT(tree, node, compare)				\
+  _libk_rb_tree_true_insert ((struct libk_rb_tree *)(tree),		\
+			     (struct libk_rb_tree_node *)(node),	\
+			     (libk_rb_tree_compare_node)(compare))
+#define RB_TREE_REMOVE(tree, compare, user_data)		\
+  _libk_rb_tree_true_remove ((struct libk_rb_tree *)(tree),	\
+			     (libk_rb_tree_compare)(compare),	\
+			     (void *)(user_data))
 
 static inline struct libk_rb_tree_node *
 _libk_rb_tree_rotate_left (struct libk_rb_tree_node *node)
@@ -71,7 +80,7 @@ _libk_rb_tree_rotate_right (struct libk_rb_tree_node *node)
   return nnode;
 }
 
-static inline
+static inline void
 _libk_rb_tree_flip_color (struct libk_rb_tree_node *node)
 {
   node->color = !node->color;
@@ -90,7 +99,7 @@ _libk_rb_tree_lookup (struct libk_rb_tree_node *head,
   if (iter == NULL)
     iter = &_iter;
 
-  iter = head;
+  *iter = head;
   while (*iter)
     {
       int cmp;
@@ -109,13 +118,14 @@ _libk_rb_tree_lookup (struct libk_rb_tree_node *head,
 
 #define _LIBK_RB_IS_RED(n) ((n) && (n)->color)
 
-static inline void
+static inline struct libk_rb_tree_node *
 _libk_rb_tree_fix (struct libk_rb_tree_node *head)
 {
  if (_LIBK_RB_IS_RED (head->right) && !_LIBK_RB_IS_RED (head->left))
    head = _libk_rb_tree_rotate_left (head);
  if (!_LIBK_RB_IS_RED (head->right) && _LIBK_RB_IS_RED (head->left))
    head = _libk_rb_tree_rotate_right (head);
+ return head;
 }
 
 static inline struct libk_rb_tree_node *
@@ -151,6 +161,17 @@ _libk_rb_tree_insert (struct libk_rb_tree_node *head,
   _libk_rb_tree_fix (head);
   
   return head;
+}
+
+static inline void
+_libk_rb_tree_true_insert (struct libk_rb_tree *tree,
+			   struct libk_rb_tree_node *node,
+			   libk_rb_tree_compare_node compare)
+{
+  tree->head = _libk_rb_tree_insert (tree->head, node, NULL, NULL, compare);
+
+  if (tree->head)
+    tree->head->color = RB_TREE_BLACK;
 }
 
 static inline struct libk_rb_tree_node *
@@ -194,18 +215,6 @@ _libk_rb_tree_remove_min_tmp (struct libk_rb_tree_node *node,
   node->left = _libk_rb_tree_remove_min_tmp(node->left, removed);
 
   return _libk_rb_tree_fix (node);
-}
-
-static inline struct libk_rb_tree_node *
-_libk_rb_tree_true_remove (struct libk_rb_tree *tree,
-			   libk_rb_tree_compare compare,
-			   void *user_data)
-{
-  struct libk_rb_tree_node *removed;
-
-  _libk_rb_tree_remove (tree->head, &removed, compare, user_data);
-
-  return removed;
 }
 
 static inline struct libk_rb_tree_node *
@@ -254,6 +263,21 @@ _libk_rb_tree_remove (struct libk_rb_tree_node *node,
     }
 
   return _libk_rb_tree_fix (node);
+}
+
+static inline struct libk_rb_tree_node *
+_libk_rb_tree_true_remove (struct libk_rb_tree *tree,
+			   libk_rb_tree_compare compare,
+			   void *user_data)
+{
+  struct libk_rb_tree_node *removed;
+
+  tree->head = _libk_rb_tree_remove (tree->head, &removed, compare, user_data);
+  
+  if (tree->head)
+    tree->head->color = RB_TREE_BLACK;
+  
+  return removed;
 }
 
 #endif

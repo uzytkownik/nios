@@ -12,7 +12,7 @@
 
 struct iapi_kernel_memory_pageset;
 
-ATOMIC_STACK (iapi_kernel_memory_page_stack; hwpointer addr);
+ATOMIC_STACK (iapi_kernel_memory_page_stack, hwpointer addr);
 
 struct iapi_kernel_memory
 {
