@@ -97,9 +97,9 @@ memory_release(struct iapi_kernel_memory *memory, hwpointer addr)
 }
 
 static size_t
-memory_get_page_size (struct iapi_kernel_memory_pageset *self)
+memory_get_page_size (struct iapi_kernel_memory_pagedir *self)
 {
-  return 0x1000;
+  return IAPI_KERNEL_MEMORY_PAGE_SIZE;
 }
 
 ATOMIC_STACK (free_cache_stack, char padding);
@@ -250,36 +250,38 @@ memory_reserve (struct iapi_kernel_memory_pagedir *self,
 
 extern void kernel_map (struct kernel_page_directory *directory,
 			hwpointer page, vpointer to);
+extern hwpointer kernel_lookup (struct kernel_page_directory *directory,
+				vpointer page);
+extern void kernel_unmap (struct kernel_page_directory *directory,
+			  hwpointer page, vpointer from);
 
 static void 
-memory_map(struct iapi_kernel_memory_pageset *self,
+memory_map(struct iapi_kernel_memory_pagedir *self,
 	   hwpointer page, vpointer to)
 {
   int block;
   int offset;
   
-  block = ptr/PAGE_BLOCK_SIZE;
-  offset = ptr % PAGE_BLOCK_SIZE;
+  block = page/PAGE_BLOCK_SIZE;
+  offset = page % PAGE_BLOCK_SIZE;
   ATOMIC_INC (&page_blocks[block]->ref[offset]);
   
   kernel_map (self->directory, page, to);
 }
 
-extern void kernel_unmap (struct kernel_page_directory *directory,
-			  hwpointer page, vpointer to);
-
 void
-memory_unmap (struct iapi_kernel_memory_pageset *self,
+memory_unmap (struct iapi_kernel_memory_pagedir *self,
 	      vpointer page, size_t size)
 {
   int ref;
   int block;
   int offset;
 
-  block = ptr/PAGE_BLOCK_SIZE;
-  offset = ptr % PAGE_BLOCK_SIZE;
-  ATOMIC_XADD (&page_blocks[block]->ref[offset], -1, &ref);
-  kernel_unmap (self->directory, page, to);
+  block = page/PAGE_BLOCK_SIZE;
+  offset = page % PAGE_BLOCK_SIZE;
+  ATOMIC_XADD (&page_blocks[block]->ref[offset], -1, ref);
+  /* TODO: Lookup */
+  kernel_unmap (self->directory, kernel_lookup (self->directory, page), page);
   
   if (!ref)
     {
@@ -287,11 +289,8 @@ memory_unmap (struct iapi_kernel_memory_pageset *self,
     }
 }
 
-extern void kernel_lookup (struct kernel_page_directory *directory,
-			   vpointer page);
-
 hwpointer
-memory_lookup (struct iapi_kernel_memory_pageset *self, vpointer page)
+memory_lookup (struct iapi_kernel_memory_pagedir *self, vpointer page)
 {
   return kernel_lookup (self->directory, page);
 }
@@ -309,4 +308,59 @@ struct iapi_kernel_memory_pagedir *
 iapi_kernel_memory_get_kernel_pagedir ()
 {
   return &_iapi_kernel_memory_kernel_pagedir;
+}
+
+int
+liballoc_lock ()
+{
+  /* lock */
+  return 0;
+}
+
+int
+liballoc_unlock ()
+{
+  /* unlock */
+  return 0;
+}
+
+void *
+liballoc_alloc(size_t pages)
+{
+  vpointer addr;
+  struct iapi_kernel_memory *mem;
+  struct iapi_kernel_memory_pagedir *pagedir;
+  size_t iter;
+  
+  mem = &_iapi_kernel_memory_main_memory;
+  pagedir = &_iapi_kernel_memory_kernel_pagedir;
+  
+  addr = pagedir->reserve (pagedir, NULL,
+			   pages * IAPI_KERNEL_MEMORY_PAGE_SIZE); 
+
+  iter = 0;
+  while (iter < pages)
+    {
+      pagedir->map(pagedir, mem->allocate (mem),
+		   addr + iter * IAPI_KERNEL_MEMORY_PAGE_SIZE);
+    }
+
+  return (void *)addr;
+}
+
+int
+liballoc_free(void *addr, size_t pages)
+{
+  struct iapi_kernel_memory *mem;
+  struct iapi_kernel_memory_pagedir *pagedir;
+  size_t iter;
+
+  mem = &_iapi_kernel_memory_main_memory;
+  pagedir = &_iapi_kernel_memory_kernel_pagedir;
+
+  pagedir->unmap (pagedir,
+		  (vpointer)addr + iter * IAPI_KERNEL_MEMORY_PAGE_SIZE,
+		  pages);
+
+  return 0;
 }

@@ -5,7 +5,7 @@ ASFLAGS+=-ggdb
 CFLAGS+=-O0 -ggdb
 endif
 
-CFLAGS+=-I. -Iarch/$(ARCH)/utils -Ilibk/ -Iliballoc
+CFLAGS+=-I. -Iarch/$(ARCH)/utils -Ilibk/ -Iliballoc -std=c99
 
 include iapi/Makefile
 

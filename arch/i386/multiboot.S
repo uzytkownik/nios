@@ -11,6 +11,19 @@ multiboot_header:
 	.long 	0x00000003 			/* Flags [ELF] */
 	.long 	-(0x1BADB002 + 0x00000003) 	/* Checksum */
 multiboot_entry:
+	movl    %cr4, %ebx
+	movl    $0x00000010, %esi
+	movl    %cr0, %ecx
+	movl    $0x80000000, %edi
+	movl    start_paging, %eax
+
+	or      %esi, %ebx
+	or      %edi, %ecx
+	
+	movl    %eax, %cr3
+	movl    %ebx, %cr4
+	movl    %ecx, %cr0
+	
 	lgdt    (start_gdt)
 	movw    $0x10, %ax
 	movw    %ax,   %ds
@@ -48,3 +61,10 @@ start_gdt_start:
 	.byte 0xFF, 0xFF, 0, 0, 0, 0b10011010, 0b11001111, 0x00 /* 0x08 */
 	.byte 0xFF, 0xFF, 0, 0, 0, 0b10010010, 0b11001111, 0x00 /* 0x10 */
 start_gdt_end:
+	.align 0x1000
+start_paging:	
+	.long 0x00000083
+	.fill 0xC0000000/0x400000-1, 4
+	.long 0x00000083
+	.fill 0x40000000/0x400000-1, 4
+	
