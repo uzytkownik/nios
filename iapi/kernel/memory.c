@@ -74,11 +74,26 @@ memory_allocate (struct iapi_kernel_memory *memory)
       block = ptr/PAGE_BLOCK_SIZE;
       offset = ptr % PAGE_BLOCK_SIZE;
 
-      ATOMIC_SET (&page_blocks[block]->ref[offset], 1);
+      ATOMIC_SET (&page_blocks[block]->ref[offset], 0);
       
       return ptr;
     }
     return HWNULL;
+}
+
+static void
+memory_release(struct iapi_kernel_memory *memory, hwpointer addr)
+{
+  struct iapi_kernel_memory_page_stack_node *node;
+
+  do
+    {
+      ATOMIC_STACK_POP (memory->free_stack, node);
+    }
+  while (node == NULL);
+
+  node->addr = addr;
+  ATOMIC_STACK_PUSH (memory->free_pages, node);
 }
 
 static size_t
@@ -86,6 +101,10 @@ memory_get_page_size (struct iapi_kernel_memory_pageset *self)
 {
   return 0x1000;
 }
+
+ATOMIC_STACK (free_cache_stack, char padding);
+struct free_cache_stack stack;
+static volatile unsigned int size;
 
 static vpointer
 memory_reserve (struct iapi_kernel_memory_pagedir *self,
@@ -114,8 +133,8 @@ memory_reserve (struct iapi_kernel_memory_pagedir *self,
 		 offsetof(struct iapi_kernel_memory_free_cache_node, node));
 	      RB_TREE_REMOVE (self->cache, memory_free_cache_rcompare_nodes,
 			      cache_node);
+	      free (cache_node);
 	      /* unlock */
-	      free (self->cache);
 	      return where;
 	    }
 	  else
@@ -130,7 +149,7 @@ memory_reserve (struct iapi_kernel_memory_pagedir *self,
 	      RB_TREE_REMOVE (self->cache, memory_free_cache_rcompare_nodes,
 			      cache_node);
 	      RB_TREE_INSERT (self->cache, cache_node,
-			      emory_free_cache_compare_nodes);
+			      memory_free_cache_compare_nodes);
 	      /* unlock */
 	      return where;
 	    }
@@ -147,32 +166,32 @@ memory_reserve (struct iapi_kernel_memory_pagedir *self,
 	    }
 	  else
 	    {
-	      struct iapi_kernel_memory_free_cache *cache_node;
+	      struct iapi_kernel_memory_free_cache_node *cache_node;
 	      
 	      if (vm_node->region.addr + vm_node->region.length < where + size)
 		{
 		  cache_node =
 		    malloc (sizeof (struct iapi_kernel_memory_free_cache));
-		  cache_node->node.region->addr =
+		  cache_node->node.region.addr =
 		    vm_node->region.addr + vm_node->region.length;
-		  cache_node->node.region->length =
+		  cache_node->node.region.length =
 		    (where + size) -
 		    (vm_node->region.addr + vm_node->region.length);
 		  RB_TREE_INSERT (self->vm_space, &cache_node->node,
 				  memory_vm_space_compare_nodes);
 		  RB_TREE_INSERT (self->cache, cache_node,
-				  emory_free_cache_compare_nodes);
+				  memory_free_cache_compare_nodes);
 		}
 
 	      
 	      vm_node->region.length = (where - vm_node->region.addr);
-	      cache_node = (struct iapi_kernel_memory_free_cache *)
+	      cache_node = (struct iapi_kernel_memory_free_cache_node *)
 		((char *)vm_node -
-		 offsetof(struct iapi_kernel_memory_free_cache, node));
+		 offsetof(struct iapi_kernel_memory_free_cache_node, node));
 	      RB_TREE_REMOVE (self->cache, memory_free_cache_rcompare_nodes,
 			      cache_node);
 	      RB_TREE_INSERT (self->cache, cache_node,
-			      emory_free_cache_compare_nodes);
+			      memory_free_cache_compare_nodes);
 	      /* unlock */
 	      return where;
 	    }
@@ -196,8 +215,8 @@ memory_reserve (struct iapi_kernel_memory_pagedir *self,
 	  RB_TREE_REMOVE (self->cache, memory_free_cache_rcompare_nodes,
 			  cache_node);
 	  RB_TREE_REMOVE (self->vm_space, memory_vm_space_compare, where);
+	  free (cache_node);
 	  /* unlock */
-
 	  return where;
 	}
       else
@@ -215,7 +234,7 @@ memory_reserve (struct iapi_kernel_memory_pagedir *self,
 	      RB_TREE_REMOVE (self->cache, memory_free_cache_rcompare_nodes,
 			      cache_node);
 	      RB_TREE_INSERT (self->cache, cache_node,
-			      emory_free_cache_compare_nodes);
+			      memory_free_cache_compare_nodes);
 
 	      /* unlock */
 	      return where;
@@ -227,4 +246,67 @@ memory_reserve (struct iapi_kernel_memory_pagedir *self,
 	    }
 	}
     }
+}
+
+extern void kernel_map (struct kernel_page_directory *directory,
+			hwpointer page, vpointer to);
+
+static void 
+memory_map(struct iapi_kernel_memory_pageset *self,
+	   hwpointer page, vpointer to)
+{
+  int block;
+  int offset;
+  
+  block = ptr/PAGE_BLOCK_SIZE;
+  offset = ptr % PAGE_BLOCK_SIZE;
+  ATOMIC_INC (&page_blocks[block]->ref[offset]);
+  
+  kernel_map (self->directory, page, to);
+}
+
+extern void kernel_unmap (struct kernel_page_directory *directory,
+			  hwpointer page, vpointer to);
+
+void
+memory_unmap (struct iapi_kernel_memory_pageset *self,
+	      vpointer page, size_t size)
+{
+  int ref;
+  int block;
+  int offset;
+
+  block = ptr/PAGE_BLOCK_SIZE;
+  offset = ptr % PAGE_BLOCK_SIZE;
+  ATOMIC_XADD (&page_blocks[block]->ref[offset], -1, &ref);
+  kernel_unmap (self->directory, page, to);
+  
+  if (!ref)
+    {
+      
+    }
+}
+
+extern void kernel_lookup (struct kernel_page_directory *directory,
+			   vpointer page);
+
+hwpointer
+memory_lookup (struct iapi_kernel_memory_pageset *self, vpointer page)
+{
+  return kernel_lookup (self->directory, page);
+}
+
+struct iapi_kernel_memory _iapi_kernel_memory_main_memory;
+struct iapi_kernel_memory_pagedir _iapi_kernel_memory_kernel_pagedir;
+
+struct iapi_kernel_memory *
+iapi_kernel_memory_get_instance ()
+{
+  return &_iapi_kernel_memory_main_memory;
+}
+
+struct iapi_kernel_memory_pagedir *
+iapi_kernel_memory_get_kernel_pagedir ()
+{
+  return &_iapi_kernel_memory_kernel_pagedir;
 }

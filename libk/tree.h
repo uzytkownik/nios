@@ -39,16 +39,16 @@ typedef int (*libk_rb_tree_compare_node)(struct libk_rb_tree_node *a,
 					 struct libk_rb_tree_node *b);
 
 #define RB_TREE_LOOKUP(tree, iter, compare, user_data)			\
-  _libk_rb_tree_lookup ((struct libk_rb_tree_node *)(tree)->head,	\
-			(struct libk_rb_tree_node *)(iter),		\
+  _libk_rb_tree_lookup ((struct libk_rb_tree_node *)(tree).head,	\
+			(struct libk_rb_tree_node **)(iter),		\
 			(libk_rb_tree_compare)(compare),		\
 			(void *)(user_data))
 #define RB_TREE_INSERT(tree, node, compare)				\
-  _libk_rb_tree_true_insert ((struct libk_rb_tree *)(tree),		\
+  _libk_rb_tree_true_insert ((struct libk_rb_tree *)(&tree),		\
 			     (struct libk_rb_tree_node *)(node),	\
 			     (libk_rb_tree_compare_node)(compare))
 #define RB_TREE_REMOVE(tree, compare, user_data)		\
-  _libk_rb_tree_true_remove ((struct libk_rb_tree *)(tree),	\
+  _libk_rb_tree_true_remove ((struct libk_rb_tree *)(&tree),	\
 			     (libk_rb_tree_compare)(compare),	\
 			     (void *)(user_data))
 
