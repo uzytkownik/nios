@@ -18,7 +18,6 @@ struct iapi_kernel_memory
 {
   struct iapi iapi;
   hwpointer (*allocate)(struct iapi_kernel_memory *memory);
-  struct iapi_kernel_memory_pagedir *(*create_pagedir)(struct iapi_kernel_memory *self);
   struct iapi_kernel_memory_page_stack free_pages;
   struct iapi_kernel_memory_page_stack free_stack;
 };
@@ -40,6 +39,15 @@ RB_TREE (iapi_kernel_memory_vm_space,
 RB_TREE (iapi_kernel_memory_free_cache,
 	 struct iapi_kernel_memory_vm_space_node node);
 
+enum iapi_kernel_memory_access_flags
+  {
+    IAPI_KERNEL_MEMORY_ACCESS_SYSTEM = 0 << 0,
+    IAPI_KERNEL_MEMORY_ACCESS_READ = 1 << 0,
+    IAPI_KERNEL_MEMORY_ACCESS_WRITE = 1 << 1,
+    IAPI_KERNEL_MEMORY_ACCESS_EXECUTE = 1 << 2,
+    IAPI_KERNEL_MEMORY_ACCESS_COPY_ON_WRITE = 1 << 3
+  };
+
 struct iapi_kernel_memory_pagedir
 {
   struct iapi iapi;
@@ -47,7 +55,11 @@ struct iapi_kernel_memory_pagedir
   vpointer (*reserve)(struct iapi_kernel_memory_pagedir *self,
 		      vpointer where, size_t size);
   void (*map)(struct iapi_kernel_memory_pagedir *self,
-	      hwpointer page, vpointer to);
+	      hwpointer page, vpointer to,
+	      enum iapi_kernel_memory_access_flags perm);
+  void (*remap)(struct iapi_kernel_memory_pagedir *self,
+		vpointer page, size_t size,
+		enum iapi_kernel_memory_access_flags perm);
   void (*unmap)(struct iapi_kernel_memory_pagedir *self,
 		vpointer page, size_t size);
   hwpointer (*lookup)(struct iapi_kernel_memory_pagedir *self, vpointer page);
@@ -61,5 +73,6 @@ extern struct iapi_kernel_memory _iapi_kernel_memory_main_memory;
 extern struct iapi_kernel_memory_pagedir _iapi_kernel_memory_kernel_pagedir;
 struct iapi_kernel_memory *iapi_kernel_memory_get_instance ();
 struct iapi_kernel_memory_pagedir *iapi_kernel_memory_get_kernel_pagedir ();
+void iapi_kernel_memory_pagedir_init (struct iapi_kernel_memory_pagedir *);
 
 #endif
