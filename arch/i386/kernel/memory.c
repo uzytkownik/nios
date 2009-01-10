@@ -116,7 +116,7 @@ void
 kernel_memory_unmap (struct kernel_page_directory *directory,
 		     hwpointer page, vpointer from)
 {
-
+  
 }
 
 hwpointer
