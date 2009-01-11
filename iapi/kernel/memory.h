@@ -68,9 +68,7 @@ struct iapi_kernel_memory_pagedir
   struct iapi_kernel_memory_free_cache cache;
 };
 
-void iapi_kernel_memory_init (struct iapi_kernel_memory_hwregion **regions);
-extern struct iapi_kernel_memory _iapi_kernel_memory_main_memory;
-extern struct iapi_kernel_memory_pagedir _iapi_kernel_memory_kernel_pagedir;
+void iapi_kernel_memory_init (void *data);
 struct iapi_kernel_memory *iapi_kernel_memory_get_instance ();
 struct iapi_kernel_memory_pagedir *iapi_kernel_memory_get_kernel_pagedir ();
 void iapi_kernel_memory_pagedir_init (struct iapi_kernel_memory_pagedir *);

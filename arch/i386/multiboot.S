@@ -63,8 +63,12 @@ start_gdt_start:
 start_gdt_end:
 	.align 0x1000
 start_paging:	
-	.long 0x00000083
+	.long 0x00000103
 	.fill 0xC0000000/0x400000-1, 4
-	.long 0x00000083
+	.long 0x00000103
+	.long 0x00400103
+	.long 0x00800103
+	.long 0x00C00103
+	.long 0x01000103
 	.fill 0x40000000/0x400000-1, 4
 	

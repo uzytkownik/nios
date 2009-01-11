@@ -1,2 +1,4 @@
 ARCH=i386
-DEBUG=1
+DEBUG=0
+CFLAGS=-Os -mtune=pentium-m -march=pentium-m -mfpmath=sse -pipe -momit-leaf-frame-pointer -ggdb -w -ftree-vectorize -ftree-loop-optimize -freorder-blocks-and-partition -fgcse-sm -fgcse-las -fgcse-after-reload -ftracer -maccumulate-outgoing-args
+LDFLAGS=-Wl,-O1 -Wl,--add-needed -Wl,--as-needed -Wl,--hash-style=both -Wl,--sort-common
