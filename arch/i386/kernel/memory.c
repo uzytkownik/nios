@@ -64,6 +64,12 @@ kernel_memory_free (struct iapi_kernel_memory_pagedir *directory)
   
 }
 
+struct iapi_kernel_memory *
+kernel_memory_lookup_pagedir (hwpointer ptr)
+{
+
+}
+
 void
 kernel_memory_map (struct kernel_page_directory *directory,
 		   hwpointer page, vpointer to,
@@ -87,7 +93,12 @@ kernel_memory_map (struct kernel_page_directory *directory,
 
       table = directory->dir->page_table[to & 0xffc00000 >> 22] =
 	(void *)pagedir->reserve (pagedir, NULL, 2*0x1000);
-      directory->dir->page_directory[to & 0xffc00000 >> 22] = hwtable[0] | 1;
+      if (to < 0xC0000000)
+	directory->dir->page_directory[to & 0xffc00000 >> 22] =
+	  hwtable[0] | 0x08;
+      else
+	directory->dir->page_directory[to & 0xffc00000 >> 22] =
+	  hwtable[0] | 0x83;
       pagedir->map (pagedir, hwtable[0],
 		    (vpointer)directory->dir->page_table[to & 0xffc00000 >> 22],
 		    IAPI_KERNEL_MEMORY_ACCESS_SYSTEM);
@@ -96,12 +107,14 @@ kernel_memory_map (struct kernel_page_directory *directory,
 		    IAPI_KERNEL_MEMORY_ACCESS_SYSTEM);
     }
 
-  table->page_table[to & 0x0003ff000 >> 12] = page | 1;
+  if (to >= 0xC0000000)
+    table->page_table[to & 0x0003ff000 >> 12] = page | (1 << 8);
+  
   if (perm & IAPI_KERNEL_MEMORY_ACCESS_READ)
-    table->page_table[(vpointer)to & 0x0003ff000 >> 12] &= (1 << 3);
+    table->page_table[(vpointer)to & 0x0003ff000 >> 12] |= (1 << 3);
   if ((perm & IAPI_KERNEL_MEMORY_ACCESS_WRITE) &&
       !(perm & IAPI_KERNEL_MEMORY_ACCESS_COPY_ON_WRITE))
-    table->page_table[(vpointer)to & 0x0003ff000 >> 12] &= (1 << 2);
+    table->page_table[(vpointer)to & 0x0003ff000 >> 12] |= (1 << 2);
 }
 
 void
@@ -109,19 +122,45 @@ kernel_memory_remap (struct kernel_page_directory *directory,
 		     vpointer page, size_t size,
 		     enum iapi_kernel_memory_access_flags perm)
 {
+  struct kernel_page_table *table;
 
+  table = directory->dir->page_table[page & 0xffc00000 >> 22];
+  if (perm & IAPI_KERNEL_MEMORY_ACCESS_READ)
+    table->page_table[page & 0x0003ff000 >> 12] |= (1 << 3);
+  else
+    table->page_table[page & 0x0003ff000 >> 12] &= ~(1 << 3);
+  if (perm & IAPI_KERNEL_MEMORY_ACCESS_WRITE &&
+      !(perm & IAPI_KERNEL_MEMORY_ACCESS_COPY_ON_WRITE))
+    table->page_table[page & 0x0003ff000 >> 12] |= (1 << 2);
+  else
+    table->page_table[page & 0x0003ff000 >> 12] &= ~(1 << 2);
+  __asm__ __volatile__ ("invlpg %0"
+			: 
+			: "m"(*((int *)page)));
 }
 
 void
 kernel_memory_unmap (struct kernel_page_directory *directory,
 		     hwpointer page, vpointer from)
 {
-  
+  struct kernel_page_table *table;
+
+  table = directory->dir->page_table[page & 0xffc00000 >> 22];
+  table->page_table[page & 0x0003ff000 >> 12] = 0;
+  __asm__ __volatile__ ("invlpg %0"
+			:
+			: "m"(*((int *)page)));
 }
 
 hwpointer
 kernel_memory_lookup (struct kernel_page_directory *directory,
 		      vpointer page)
 {
+  struct kernel_page_table *table;
+  table = directory->dir->page_table[page & 0xffc00000 >> 22];
 
+  if (table)
+    return table->page_table[page & 0x0003ff000 >> 12] & 0x0003ff000;
+  
+  return HWNULL;
 }
