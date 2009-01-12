@@ -225,15 +225,17 @@ bootup_memory ()
       iter += 0x00400000;
     }
 
+  /* We initially allocate 32 kiB of memory. */
   nodes = (struct iapi_kernel_memory_page_stack_node *)(0xC1000000);
   iter = 0;
   while (iter < 512)
     {
-      nodes[iter].addr = 0xC1000000 + (iter + 1)*0x1000;
+      nodes[iter].addr = 0x01000000 + (iter + 1)*0x1000;
       nodes[iter].next = nodes->next;
     }
-  nodes[514].next = NULL;
+  nodes[511].next = NULL;
   main.free_pages.head = nodes;
+  main.free_stack.head = NULL;
 }
 
 void
@@ -241,8 +243,37 @@ iapi_kernel_memory_init (void *data)
 {
   struct multiboot_info *info;
   struct multiboot_memory_map *mmap;
-
+  struct iapi_kernel_memory_page_stack_node *nodes;
+  struct iapi_kernel_memory_page_stack_node *nnodes[512];
+  struct iapi_kernel_memory_page_stack_node *inode;
+  struct iapi_kernel_memory_page_stack_node *anodes_start, *anodes_end;
+  size_t iter;
+  
   bootup_memory ();
+  
+  iter = 0;
+  while (iter < 512)
+    {
+      nnodes[iter] =
+	malloc (sizeof (struct iapi_kernel_memory_page_stack_node *));      
+    }
+  iter = 0;
+  nodes = (struct iapi_kernel_memory_page_stack_node *)(0xC1000000);
+  while (iter < 512)
+    {
+      if (nodes[iter].next)
+	nnodes[iter]->next = nnodes[nodes[iter].next - nodes];
+      else
+	nnodes[iter]->next = NULL;
+      nnodes[iter]->addr = nodes[iter].addr;
+    }
+  if (main.free_pages.head)
+    main.free_pages.head = nnodes[main.free_pages.head - nodes];
+  if (main.free_stack.head)
+    main.free_stack.head = nnodes[main.free_stack.head - nodes];
+  nodes = malloc (sizeof (struct iapi_kernel_memory_page_stack_node *));
+  nodes->next = main.free_pages.head;
+  nodes->addr = 0x01000000;
   
   info = (struct multiboot_info *)data;
   mmap = info->mmap.addr;
@@ -250,7 +281,23 @@ iapi_kernel_memory_init (void *data)
     {
       if (mmap->type == 1)
 	{
-	  
+	  hwpointer page;
+	  if (mmap->addr < 0x01201000)
+	    if (mmap->addr + mmap->length <= 0x01201000)
+	      continue;
+	    else
+	      mmap->addr = 0x1201000;
+	  page = mmap->addr;
+	  while (page < mmap->addr + mmap->length)
+	    {
+	      struct iapi_kernel_memory_page_stack_node *node;
+
+	      node = malloc (sizeof (struct iapi_kernel_memory_page_stack_node));
+	      node->next = main.free_pages.head;
+	      main.free_pages.head = node;
+
+	      page += 0x1000;
+	    }
 	}
       
       mmap = (struct multiboot_memory_map *)((unsigned int)mmap + mmap->size +
