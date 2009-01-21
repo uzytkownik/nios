@@ -1,6 +1,7 @@
 #define STACK_SIZE 0x4000
 
-.section .setup
+//.section .setup
+.section .setup,"ax",@progbits
 	.globl start, _start
 start:
 _start:
