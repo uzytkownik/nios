@@ -1,30 +1,14 @@
 #define STACK_SIZE 0x4000
 
-//.section .setup
 .section .setup,"ax",@progbits
-	.globl start, _start
-start:
-_start:
-	jmp multiboot_entry
-	.align  4
+	.align 4
 multiboot_header:
 	.long 	0x1BADB002 			/* Magick */
 	.long 	0x00000003 			/* Flags [ELF] */
 	.long 	-(0x1BADB002 + 0x00000003) 	/* Checksum */
-multiboot_entry:
-	movl    %cr4, %ebx
-	movl    $0x00000010, %esi
-	movl    %cr0, %ecx
-	movl    $0x80000000, %edi
-	movl    start_paging, %eax
 
-	or      %esi, %ebx
-	or      %edi, %ecx
-	
-	movl    %eax, %cr3
-	movl    %ebx, %cr4
-	movl    %ecx, %cr0
-	
+	.globl start
+start:
 	lgdt    (start_gdt)
 	movw    $0x10, %ax
 	movw    %ax,   %ds
@@ -33,7 +17,22 @@ multiboot_entry:
 	movw    %ax,   %gs
 	movw    %ax,   %ss
 
-	ljmp    $0x08, $hh_start
+	ljmp    $0x08, $paging
+paging:	
+	movl 	$start_paging, %eax
+	movl 	%eax, %cr3
+
+	movl  	%cr4, %eax
+	movl    $0x00000010, %esi
+	or 	%esi, %eax
+	movl  	%eax, %cr4
+
+	movl    %cr0, %eax
+	movl    $0x80000000, %edi
+	or	%edi, %eax
+	movl    %eax, %cr0
+
+	jmp    	hh_start
 
 .text
 hh_start:	
@@ -63,13 +62,14 @@ start_gdt_start:
 	.byte 0xFF, 0xFF, 0, 0, 0, 0b10010010, 0b11001111, 0x00 /* 0x10 */
 start_gdt_end:
 	.align 0x1000
+	.globl start_paging
 start_paging:	
 	.long 0x00000103
-	.fill 0xC0000000/0x400000-1, 4
+	.fill 0x300-(. - start_paging)/4, 4
 	.long 0x00000103
 	.long 0x00400103
 	.long 0x00800103
 	.long 0x00C00103
 	.long 0x01000103
-	.fill 0x40000000/0x400000-1, 4
+	.fill 0x400 - (. - start_paging)/4, 4
 	
