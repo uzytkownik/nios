@@ -34,21 +34,6 @@ paging:
 
 	jmp    	hh_start
 
-.text
-hh_start:	
-	movl 	$(stack + STACK_SIZE), %esp  	/* Initalize stack pointer */
-
-	pushl   $0				/* Reset EFLAGS */
-	popf
-
-	pushl	%ebx
-	pushl	%eax
-
-	call	kstart
-
-	.lcomm stack, STACK_SIZE
-	
-.section .setup
 	.align 4
 	.globl start_gdt, start_gdt_start
 start_gdt:
@@ -64,12 +49,25 @@ start_gdt_end:
 	.align 0x1000
 	.globl start_paging
 start_paging:	
-	.long 0x00000103
+	.long 0x00000183
 	.fill 0x300-(. - start_paging)/4, 4
-	.long 0x00000103
-	.long 0x00400103
-	.long 0x00800103
-	.long 0x00C00103
-	.long 0x01000103
+	.long 0x00000183
+	.long 0x00400183
+	.long 0x00800183
+	.long 0x00C00183
+	.long 0x01000183
 	.fill 0x400 - (. - start_paging)/4, 4
 	
+.text
+hh_start:	
+	movl 	$(stack + STACK_SIZE), %esp  	/* Initalize stack pointer */
+
+	pushl   $0				/* Reset EFLAGS */
+	popf
+
+	pushl	%ebx
+	pushl	%eax
+
+	call	kstart
+
+	.lcomm stack, STACK_SIZE
