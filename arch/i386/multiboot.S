@@ -26,13 +26,11 @@ paging:
 	movl 	%eax, %cr3
 
 	movl  	%cr4, %eax
-	movl    $0x00000010, %esi
-	or 	%esi, %eax
+	btsl 	$4, %eax
 	movl  	%eax, %cr4
 
 	movl    %cr0, %eax
-	movl    $0x80000000, %edi
-	or	%edi, %eax
+	btsl	$31, %eax
 	movl    %eax, %cr0
 
 	jmp    	hh_start
