@@ -18,7 +18,10 @@ start:
 	movw    %ax,   %ss
 
 	ljmp    $0x08, $paging
-paging:	
+paging:
+	movl    %eax, %ecx
+	movl    %ebx, %edx
+	
 	movl 	$start_paging, %eax
 	movl 	%eax, %cr3
 
@@ -65,8 +68,8 @@ hh_start:
 	pushl   $0				/* Reset EFLAGS */
 	popf
 
-	pushl	%ebx
-	pushl	%eax
+	pushl	%edx
+	pushl	%ecx
 
 	call	kstart
 
