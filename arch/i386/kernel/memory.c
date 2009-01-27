@@ -23,6 +23,10 @@ static struct iapi_kernel_memory main;
 static struct iapi_kernel_memory dma;
 static struct iapi_kernel_memory_pagedir kernel_pagedir;
 
+static struct kernel_page_dir kernel_dir;
+static struct kernel_page_directory kernel_directory;
+static struct kernel_page_table kernel_pagetable;
+
 static inline void
 kernel_memory_init (struct iapi_kernel_memory_pagedir *directory)
 {
@@ -186,121 +190,94 @@ extern vpointer phys_end;
 extern vpointer end;
 extern vpointer virt;
 
-static inline void
-bootup_memory ()
+static int mem_init = 0;
+
+int
+liballoc_lock ()
 {
-  static struct iapi_kernel_memory_free_cache_node intial_free_cache_node;
-  struct iapi_kernel_memory_page_stack_node *nodes;
-  size_t iter;
-  
-  /* TODO: Include modules */
-  intial_free_cache_node.node.region.addr = end;
-  intial_free_cache_node.node.region.length = -end;
-  intial_free_cache_node.node.next =
-    intial_free_cache_node.node.prev =
-    intial_free_cache_node.node.left =
-    intial_free_cache_node.node.right = NULL;
-  intial_free_cache_node.next =
-    intial_free_cache_node.prev =
-    intial_free_cache_node.left =
-    intial_free_cache_node.right = NULL;
-  main.allocate = memory_allocate;
-  dma.allocate = memory_allocate;
+  if (mem_init)
+    memory_lock ();
+}
 
-  iter = 0;
-  while (iter < 1024)
-    {
-      kernel_pagedir.directory->dir->page_directory[iter] = 0;
-      kernel_pagedir.directory->dir->page_table[iter] = 0;
-      iter++;
-    }
+int
+liballoc_unlock ()
+{
+  if (mem_init)
+    memory_unlock ();
+}
 
-  /* TODO: Add support for modules */
-  iter = 0;
-  while (iter < phys_end)
-    {
-      kernel_pagedir.directory->dir->page_directory[0x300 + iter] =
-	(0x00400000 * iter) | 0x183;
-      kernel_pagedir.directory->dir->page_table[0x300 + iter] = NULL;
-      iter += 0x00400000;
-    }
+void *
+liballoc_alloc (size_t pages)
+{
+  if (mem_init)
+    return memory_alloc (pages);
+  mem_init = pages;
+  return (void *)0xC1000000;
+}
 
-  /* We initially allocate 32 kiB of memory. */
-  nodes = (struct iapi_kernel_memory_page_stack_node *)(0xC1000000);
-  iter = 0;
-  while (iter < 512)
-    {
-      nodes[iter].addr = 0x01000000 + (iter + 1)*0x1000;
-      nodes[iter].next = nodes->next;
-    }
-  nodes[511].next = NULL;
-  main.free_pages.head = nodes;
-  main.free_stack.head = NULL;
+int
+liballoc_free (void *addr, size_t pages)
+{
+  return memory_free (addr, pages);
 }
 
 void
 iapi_kernel_memory_init (void *data)
 {
-  struct multiboot_info *info;
-  struct multiboot_memory_map *mmap;
-  struct iapi_kernel_memory_page_stack_node *nodes;
-  struct iapi_kernel_memory_page_stack_node *nnodes[512];
-  struct iapi_kernel_memory_page_stack_node *inode;
-  struct iapi_kernel_memory_page_stack_node *anodes_start, *anodes_end;
   size_t iter;
+  struct iapi_kernel_memory_free_cache_node *free_cache_node;
   
-  bootup_memory ();
+  /* The first call simply initialize the structs */
+  main.free_stack.head = NULL;
+  iter = 0;
+  while (iter < mem_init || mem_init == 0)
+    {
+      struct iapi_kernel_memory_page_stack_node *node;
+      node = malloc (sizeof (struct iapi_kernel_memory_page_stack_node));
+      node->next =
+	(struct iapi_kernel_memory_page_stack_node *)main.free_stack.head;
+      main.free_stack.head = node;
+      iter += 1;
+    }
+  main.free_pages.head = NULL;
+
+  free_cache_node = malloc (sizeof (struct iapi_kernel_memory_free_cache_node));
+  free_cache_node->left = free_cache_node->right =
+    free_cache_node->next = free_cache_node->prev = NULL;
+  free_cache_node->node.left = free_cache_node->node.right =
+    free_cache_node->node.next = free_cache_node->node.prev = NULL;
+  free_cache_node->node.region.addr = 0xC1000000 + 0x1000 * mem_init;
+  free_cache_node->node.region.length = -free_cache_node->node.region.addr;
+
+  kernel_directory.dir = &kernel_dir;
+  kernel_directory.hwaddress = (hwpointer)&kernel_dir - virt;
+  
+  kernel_pagedir.vm_space.head = &free_cache_node->node;
+  kernel_pagedir.cache.head = free_cache_node;
+  kernel_pagedir.directory = &kernel_directory;
+
+  iter = 0;
+  while (iter < 0x01000000)
+    {
+      kernel_dir.page_directory[768 + iter / 0x400000] = iter | 0x183;
+      kernel_dir.page_table[0x300 + iter / 0x400000] = 0;
+      iter += 0x400000;
+    }
+
+  kernel_dir.page_directory[0x304] = (unsigned long)&kernel_pagetable - virt;
+  kernel_dir.page_table[0x304] = &kernel_pagetable;
   
   iter = 0;
-  while (iter < 512)
+  while (iter < mem_init)
     {
-      nnodes[iter] =
-	malloc (sizeof (struct iapi_kernel_memory_page_stack_node *));      
+      kernel_pagetable.page_table[iter] = (0x01000000 + iter * 0x1000) | 0x183;
+      iter++;
     }
-  iter = 0;
-  nodes = (struct iapi_kernel_memory_page_stack_node *)(0xC1000000);
-  while (iter < 512)
+  while (iter < 0x400)
     {
-      if (nodes[iter].next)
-	nnodes[iter]->next = nnodes[nodes[iter].next - nodes];
-      else
-	nnodes[iter]->next = NULL;
-      nnodes[iter]->addr = nodes[iter].addr;
+      kernel_pagetable.page_table[iter] = 0;
+      iter++;
     }
-  if (main.free_pages.head)
-    main.free_pages.head = nnodes[main.free_pages.head - nodes];
-  if (main.free_stack.head)
-    main.free_stack.head = nnodes[main.free_stack.head - nodes];
-  nodes = malloc (sizeof (struct iapi_kernel_memory_page_stack_node *));
-  nodes->next = main.free_pages.head;
-  nodes->addr = 0x01000000;
+
   
-  info = (struct multiboot_info *)data;
-  mmap = info->mmap.addr;
-  while((int)mmap < (int)info->mmap.addr + info->mmap.length)
-    {
-      if (mmap->type == 1)
-	{
-	  hwpointer page;
-	  if (mmap->addr < 0x01201000)
-	    if (mmap->addr + mmap->length <= 0x01201000)
-	      continue;
-	    else
-	      mmap->addr = 0x1201000;
-	  page = mmap->addr;
-	  while (page < mmap->addr + mmap->length)
-	    {
-	      struct iapi_kernel_memory_page_stack_node *node;
-
-	      node = malloc (sizeof (struct iapi_kernel_memory_page_stack_node));
-	      node->next = main.free_pages.head;
-	      main.free_pages.head = node;
-
-	      page += 0x1000;
-	    }
-	}
-      
-      mmap = (struct multiboot_memory_map *)((unsigned int)mmap + mmap->size +
-					     sizeof(unsigned int));
-    }
 }

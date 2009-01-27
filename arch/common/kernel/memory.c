@@ -420,22 +420,22 @@ iapi_kernel_memory_pagedir_init (struct iapi_kernel_memory_pagedir *pagedir)
   kernel_memory_init (pagedir);
 }
 
-int
-liballoc_lock ()
+static int
+memory_lock ()
 {
   /* lock */
   return 0;
 }
 
-int
-liballoc_unlock ()
+static int
+memory_unlock ()
 {
   /* unlock */
   return 0;
 }
 
-void *
-liballoc_alloc(size_t pages)
+static void *
+memory_alloc(size_t pages)
 {
   vpointer addr;
   struct iapi_kernel_memory *mem;
@@ -460,7 +460,7 @@ liballoc_alloc(size_t pages)
 }
 
 int
-liballoc_free(void *addr, size_t pages)
+memory_free(void *addr, size_t pages)
 {
   struct iapi_kernel_memory *mem;
   struct iapi_kernel_memory_pagedir *pagedir;
