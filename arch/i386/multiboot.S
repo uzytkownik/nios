@@ -9,6 +9,9 @@ multiboot_header:
 
 	.globl start
 start:
+	movl    %eax, %ecx
+	movl    %ebx, %edx
+	
 	lgdt    (start_gdt)
 	movw    $0x10, %ax
 	movw    %ax,   %ds
@@ -19,9 +22,6 @@ start:
 
 	ljmp    $0x08, $paging
 paging:
-	movl    %eax, %ecx
-	movl    %ebx, %edx
-	
 	movl 	$start_paging, %eax
 	movl 	%eax, %cr3
 
