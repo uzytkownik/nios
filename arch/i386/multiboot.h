@@ -1,6 +1,8 @@
 #ifndef ARCH_I386_KERNEL_MULTIBOOT
 #define ARCH_I386_KERNEL_MULTIBOOT
 
+extern "C" {
+
 #pragma pack(1)
 
 struct multiboot_modules
@@ -70,5 +72,7 @@ struct multiboot_info
 };
 
 #pragma pack()
+
+};
 
 #endif

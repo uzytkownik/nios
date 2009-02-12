@@ -3,11 +3,14 @@
 .section .setup,"ax",@progbits
 	.align 4
 multiboot_header:
+	.type	multiboot_header, @object
+	.size 	multiboot_header, 12
 	.long 	0x1BADB002 			/* Magick */
 	.long 	0x00000003 			/* Flags [ELF] */
 	.long 	-(0x1BADB002 + 0x00000003) 	/* Checksum */
 
-	.globl start
+	.globl 	start
+	.type 	start, @function
 start:
 	movl    %eax, %ecx
 	movl    %ebx, %edx
@@ -20,8 +23,8 @@ start:
 	movw    %ax,   %gs
 	movw    %ax,   %ss
 
-	ljmp    $0x08, $paging
-paging:
+	ljmp    $0x08, $_paging
+_paging:
 	movl 	$start_paging, %eax
 	movl 	%eax, %cr3
 
@@ -35,31 +38,39 @@ paging:
 
 	jmp    	hh_start
 
-	.align 4
-	.globl start_gdt, start_gdt_start
+	.size	start, .-start
+	.align	4
+	.globl 	start_gdt, start_gdt_start
 start_gdt:
-	.word start_gdt_end - start_gdt_start - 1
-	.long start_gdt_start
-	.align 4
+	.type 	start_gdt, @object
+	.word 	_start_gdt_end - start_gdt_start - 1
+	.long 	start_gdt_start
+	.size 	start_gdt, .-start_gdt
+	.align 	4
 start_gdt_start:
-	.byte 0x00, 0x00, 0, 0, 0, 0b00000000, 0b00000000, 0x00
+	.type 	start_gdt_start, @object
+	.byte	 0x00, 0x00, 0, 0, 0, 0b00000000, 0b00000000, 0x00
 	/* Kernel */
-	.byte 0xFF, 0xFF, 0, 0, 0, 0b10011010, 0b11001111, 0x00 /* 0x08 */
-	.byte 0xFF, 0xFF, 0, 0, 0, 0b10010010, 0b11001111, 0x00 /* 0x10 */
-start_gdt_end:
-	.align 0x1000
-	.globl start_paging
-start_paging:	
-	.long 0x00000183
-	.fill 0x300-(. - start_paging)/4, 4
-	.long 0x00000183
-	.long 0x00400183
-	.long 0x00800183
-	.long 0x00C00183
-	.long 0x01000183
-	.fill 0x400 - (. - start_paging)/4, 4
-	
+	.byte 	0xFF, 0xFF, 0, 0, 0, 0b10011010, 0b11001111, 0x00 /* 0x08 */
+	.byte 	0xFF, 0xFF, 0, 0, 0, 0b10010010, 0b11001111, 0x00 /* 0x10 */
+	.size 	start_gdt_start, .-start_gdt_start
+_start_gdt_end:
+	.align 	0x1000
+	.globl 	start_paging
+	.type 	start_paging, @object
+start_paging:
+	.long 	0x00000183
+	.fill 	0x300-(. - start_paging)/4, 4
+	.long 	0x00000183
+	.long 	0x00400183
+	.long 	0x00800183
+	.long 	0x00C00183
+	.long 	0x01000183
+	.fill 	0x400 - (. - start_paging)/4, 4
+	.size 	start_paging, .-start_paging
 .text
+	.globl 	hh_start
+	.type 	hh_start, @function
 hh_start:	
 	movl 	$(stack + STACK_SIZE), %esp  	/* Initalize stack pointer */
 
@@ -70,5 +81,6 @@ hh_start:
 	pushl	%ecx
 
 	call	kstart
-
+	
+	.size	hh_start, hh_start-.
 	.lcomm stack, STACK_SIZE
