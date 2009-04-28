@@ -22,7 +22,7 @@ namespace kiapi
 	virtual hardware_address acquire(hardware_address) = 0;
 	virtual void release(hardware_address) = 0;
 	static memory &get_main();
-	static memory &get_drm();
+	static memory &get_dma();
       };
       
       class virtual_memory
@@ -39,6 +39,7 @@ namespace kiapi
 	void map(void *, hardware_address, size_t);
 	void unmap(void *, size_t);
 	hardware_address lookup(void *) const;
+	void use();
 	static virtual_memory &get_kernel();
       };
     };

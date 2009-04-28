@@ -1,580 +1,515 @@
 #include "kiapi/kernel/memory.hh"
 #include <new>
 #include <set>
-
-typedef unsigned int uint_t;
+#include <map>
+#include <cstdatomic>
+#include <inttypes.h>
 
 using namespace kiapi::kernel::memory;
 
-template<typename T>
-class atomic_stack
-{
-  struct node
-  {
-    node *next;
-    T data;
-  };
-  volatile node *stack;
-  volatile node *free_nodes;
-  friend bool kiapi::kernel::memory::init(multiboot_info *);
-public:
-  atomic_stack() : stack(NULL), free_nodes(NULL) {}
-  
-  bool pop(node *&no)
-  {
-    while(node *n = const_cast<node *>(stack))
-      {
-	if(__sync_bool_compare_and_swap(&stack, n, n->next))
-	  {
-	    no = n;
-	    return true;
-	  }
-      }
-    return false;
-  }
-  
-  bool pop(T &data)
-  {
-    node *n;
-
-    if(pop(n))
-      {
-	data = n->data;
-	do
-	  {
-	    n->next = const_cast<node *>(free_nodes);
-	  }
-	while(__sync_bool_compare_and_swap(&free_nodes, n->next, n));
-	return true;
-      }
-    return false;
-  }
-  
-  void push(node *&n)
-  {
-    do
-      {
-	n->next = const_cast<node *>(stack);
-      }
-    while(__sync_bool_compare_and_swap(&stack, n->next, n));
-  }
-  
-  bool push(T &data)
-  {
-    while (node *n = const_cast<node *>(free_nodes))
-      {
-	if (__sync_bool_compare_and_swap(&stack, n, n->next))
-	  {
-	    n->data = data;
-	    push(n);
-	    return true;
-	  }
-      };
-    return false;
-  }
-  
-  bool operator>>(node *&data)
-  {
-    return pop(data);
-  }
-  
-  bool operator>>(T &data)
-  {
-    return pop(data);
-  }
-  
-  void operator<<(node *&data)
-  {
-    return push(data);
-  }
-  
-  bool operator<<(T &data)
-  {
-    return push(data);
-  } 
-};
-
-static atomic_stack<hardware_address> *_page_stack;
-inline atomic_stack<hardware_address> &
-get_page_stack()
-{
-  return *_page_stack;
-}
-
-struct page_block
-{
-  volatile int ref[1024];
-};
-
-static page_block **_page_blocks;
-static volatile int *
-get_ref_count_for(hardware_address addr)
-{
-  unsigned int ptr = addr.ptr;
-  int block = ptr / 0x400000;
-  int offset = ptr % 0x400000;
-  return &_page_blocks[block]->ref[offset];
-}
-
-class main_memory : memory
+template <typename T>
+class base_atomic_stack
 {
 public:
-  size_t
-  page_size() const
+  struct bucket
   {
-    return 0x1000;
+    bucket *next;
+    T value;
   };
-
-  hardware_address
-  allocate()
-  {
-    atomic_stack<hardware_address> &stack = get_page_stack();
-    hardware_address hw;
-    stack >> hw;
-    volatile int *ref = get_ref_count_for(hw);
-    *ref = 0;
-    return hw;
-  }
-
-  hardware_address
-  acquire(hardware_address addr)
-  {
-    volatile int *ref = get_ref_count_for(addr);
-    __sync_add_and_fetch (ref, 1);
-    return addr;
-  }
-  
-  void
-  release(hardware_address addr)
-  {
-    volatile int *ref = get_ref_count_for(addr);
-    if (!__sync_sub_and_fetch (ref, 1))
-      {
-	atomic_stack<hardware_address> &stack = get_page_stack();
-	stack << addr;
-      }
-  }
-};
-
-static memory *_main;
-memory &
-memory::get_main()
-{
-  return *_main;
-};
-
-class drm_memory
-{
-
-};
-
-static char *_drm;
-memory &
-memory::get_drm()
-{
-  return reinterpret_cast<memory &>(_drm);
-};
-
-struct free_space_block
-{
-  void *memory_map;
-  size_t length;
-};
-
-template<typename T, unsigned int min_fill = 32>
-class real_allocator
-{
-  union node
-  {
-    node *next;
-    T node;
-  };
-  volatile node *head;
-  volatile int size;
-  volatile bool feed;
-  void
-  allocate_more()
-  {
-    if(__sync_bool_compare_and_swap(&feed, false, true))
-      {
-	node *nnodes;
-	nnodes = (node *)(virtual_memory::get_kernel().reserve(1));
-	if(nnodes != NULL)
-	  {
-	    hardware_address naddr = memory::get_main().allocate();
-	    virtual_memory::get_kernel().map(nnodes, naddr, 1);
-	    const size_t nodes_in_page = 0x1000/sizeof(node);
-	    feed(nnodes, nodes_in_page);
-	  }
-	feed = false:
-	__sync_synchronize();
-      }
-  }
-    void
-  feed(node *nnodes, size_t length)
-  {
-    for(size_t i = 0; i < length; i++)
-      {
-	nnodes[i].next = &nnodes[i+1];
-      }
-    node *ohead;
-    do
-      {
-	ohead = const_cast<node *>(head);
-	nnodes[nodes_in_page - 1].next = ohead;
-      }
-    while (__sync_bool_compare_and_swap(&head, ohead, nnodes));
-    __sync_add_and_fetch(&size, length);
-  }
-  friend kiapi::kernel::memory::init(multiboot_info *info);
+private:
+  std::atomic<bucket *> head;
 public:
-  real_allocator() : head(0), size(0), feed(false) {}
-  T *
-  allocate()
+  bucket *pop()
   {
-    node *next;
+    bucket *old_head = head.load();
+    bucket *next;
     do
       {
-	next = const_cast<node *>(head);
-	if(next == NULL)
-	  allocate_more();
+	if (__builtin_expect(old_head == NULL, false))
+	  return NULL;
+	next = old_head->next;
       }
-    while (__sync_bool_compare_and_swap(&head, next, next->next));
-    if(__sync_sub_and_fetch(&size, 1) < min_fill)
-      {
-	allocate_more();
-      }
-    return (T *)next;
+    while (head.compare_exchange_strong(old_head, next));
+    return old_head;
   }
-  void
-  deallocate(T *ptr)
+  void push(bucket *b)
   {
-    node *n = (node *)ptr;
-    node *ohead;
     do
       {
-	ohead = const_cast<node *>(head);
-	n->next = ohead;
+	b->next = head.load();
       }
-    while(__sync_bool_compare_and_swap(&head, ohead, n));
+    while(head.compare_exchange_strong(b->next, b));
+  }
+  void feed(bucket *first, bucket *last)
+  {
+    do
+      {
+	last->next = head.load();
+      }
+    while(head.compare_exchange_strong(last->next, first));
   }
 };
 
-real_allocator<std::_Rb_tree_node<free_space_block> > *_rallocator;
-static inline real_allocator<std::_Rb_tree_node<free_space_block> > &
-get_real_allocator()
+struct dummy {};
+
+template<size_t size>
+class real_page_allocator
 {
-  return *_rallocator;
-}
+  static base_atomic_stack<dummy> free_pages;
+  typedef typename base_atomic_stack<dummy>::bucket bucket;
+  static std::atomic_flag feed_lock;
+  static void feed(void *ptr, size_t length)
+  {
+    char *buckets = reinterpret_cast<char *>(ptr);
+    size_t s = std::min(size, sizeof(bucket));
+    bucket *next = NULL;
+    for(size_t i = 0; i < length - s + 1; i += s)
+      {
+	bucket *b = reinterpret_cast<bucket *>(&buckets[i]);
+	b->next = next;
+	next = b;
+      }
+    free_pages.feed(next, reinterpret_cast<bucket *>(buckets));
+  }
+  static void feed()
+  {
+    memory &main = memory::get_main();
+    hardware_address address = main.allocate();
+    size_t page_size = main.page_size();
+    virtual_memory &kvmem = virtual_memory::get_kernel();
+    void *ptr = kvmem.reserve(page_size);
+    kvmem.map(ptr, address, page_size);
+    feed(ptr, page_size);
+  }
+public:
+  static void *allocate()
+  {
+    do
+      {
+	bucket *b = free_pages.pop();
+	if(__builtin_expect(b != NULL, true))
+	  return b;
+	if(__builtin_expect(!feed_lock.test_and_set(), true))
+	  {
+	    feed();
+	    feed_lock.clear();
+	  }
+      }
+    while(true);
+  }
+  static void deallocate(void *__p)
+  {
+    free_pages.push(reinterpret_cast<bucket *>(__p));
+  }
+};
+
+template<size_t size>  
+base_atomic_stack<dummy> real_page_allocator<size>::free_pages;
+template<size_t size>
+std::atomic_flag real_page_allocator<size>::feed_lock;
 
 template<typename T>
-class vm_allocator
+class page_allocator
 {
+  typedef real_page_allocator<sizeof(T)> rpage_allocator;
 public:
-  typedef const T *const_pointer;
-  typedef const T &const_reference;
+  typedef size_t    size_type;
   typedef ptrdiff_t difference_type;
-  typedef T *pointer;
-  typedef T &reference;
-  typedef size_t size_type;
-  typedef T value_type;
-
-  vm_allocator() {}
-
-  vm_allocator(const vm_allocator<value_type> &) {}
-
-  template <typename TN>
-  vm_allocator(const vm_allocator<TN> &) {}
-
-  template <typename TN>
+  typedef T*        pointer;
+  typedef const T*  const_pointer;
+  typedef T&        reference;
+  typedef const T&  const_reference;
+  typedef T         value_type;
+  
+  template<typename T1>
   struct rebind
   {
-    typedef vm_allocator<TN> other;
+    typedef page_allocator<T1> other;
   };
 
-  void
-  construct(pointer p, const_reference val)
+  page_allocator() throw() { }
+  page_allocator(const page_allocator &) throw() { }
+  template<typename T1>
+  page_allocator(const page_allocator<T1>) throw() { }
+
+  pointer address(reference __x) const { return &__x; }
+  const_pointer address(const_reference __x) const { return &__x; }
+
+  pointer allocate(size_type __n, const void * = 0)
   {
-    new (p) value_type(val);
+    if (__builtin_expect(__n > 1, false))
+      {
+	std::__throw_bad_alloc();
+      }
+    if (__builtin_expect(__n == 1, true))
+      {
+	return reinterpret_cast<pointer>(rpage_allocator::allocate());
+      }
+    return NULL;
   }
 
-  void
-  destroy(pointer p)
+  void deallocate(pointer __p, size_type)
   {
-    p->~value_type();
-  }
-};
-
-template<>
-class vm_allocator<std::_Rb_tree_node<free_space_block> >
-{
-public:
-  typedef const std::_Rb_tree_node<free_space_block> *const_pointer;
-  typedef const std::_Rb_tree_node<free_space_block> &const_reference;
-  typedef ptrdiff_t difference_type;
-  typedef std::_Rb_tree_node<free_space_block> *pointer;
-  typedef std::_Rb_tree_node<free_space_block> &reference;
-  typedef size_t size_type;
-  typedef std::_Rb_tree_node<free_space_block> value_type;
-
-  vm_allocator() {}
-
-  vm_allocator(const vm_allocator<value_type> &) {}
-
-  template <typename TN>
-  vm_allocator(const vm_allocator<TN> &) {}
-
-  pointer
-  address(reference x) const
-  {
-    return &x;
+    rpage_allocator::deallocate(__p);
   }
 
-  const_pointer
-  address(const_reference x) const
-  {
-    return &x;
-  }
-
-  pointer
-  allocate(size_type n, const void * = 0)
-  {
-    if(n == 1)
-      return get_real_allocator().allocate();
-    else
-      return NULL;
-  }
-
-  void
-  deallocate(pointer p, size_type n)
-  {
-    get_real_allocator().deallocate(p);
-  }
-
-  size_type
-  max_size() const throw()
+  size_type max_size() const throw()
   {
     return 1;
   }
 
-  void
-  construct(pointer p, const_reference val)
+  void construct(pointer __p, const T &__val)
   {
-    new (p) value_type(val);
+    ::new((void *)__p) T(__val);
   }
 
-  void
-  destroy(pointer p)
+  void destroy(pointer __p)
   {
-    p->~value_type();
+    __p->~T();
   }
 
-  template <typename TN>
-  struct rebind
+  inline bool operator==(const page_allocator &)
   {
-    typedef vm_allocator<TN> other;
-  };
+    return true;
+  }
+
+  inline bool operator!=(const page_allocator &)
+  {
+    return false;
+  }
 };
+
+template<typename T>
+class atomic_stack
+{
+  base_atomic_stack<T> stack;
+  typedef typename base_atomic_stack<T>::bucket bucket;
+  page_allocator<bucket> bucket_allocator;
+public:
+  bool pop(T &__p)
+  {
+    bucket *b = stack.pop();
+    if(__builtin_expect(b == NULL, false))
+      {
+	return false;
+      }
+    else
+      {
+	__p = b->value;
+	bucket_allocator.deallocate(b, 1);
+	return true;
+      }
+  }
+  void push(T &__p)
+  {
+    bucket *b = bucket_allocator.allocate(1);
+    b->value = __p;
+  }
+};
+
+template<typename T>
+class atomic_stack<T *>
+{
+  base_atomic_stack<T *> stack;
+  typedef typename base_atomic_stack<T *>::bucket bucket;
+  page_allocator<bucket> bucket_allocator;
+public:
+  bool pop(T *&__p)
+  {
+    bucket *b = stack.pop();
+    if (__builtin_expect(b == NULL, false))
+      {
+	__p = NULL;
+	return false;
+      }
+    else
+      {
+	__p = b->value;
+	bucket_allocator.deallocate(b);
+	return true;
+      }
+  }
+  T *pop()
+  {
+    bucket *b = stack.pop();
+    T *t = b->value;
+    bucket_allocator.deallocate(b);
+    return t;
+  }
+  void push(T *__p)
+  {
+    bucket *b = bucket_allocator.allocate(1);
+    b->value = __p;
+  }
+};
+
+class main_memory : memory
+{
+  atomic_stack<hardware_address> stack;
+public:
+  size_t page_size()
+  {
+    return 4096;
+  }
+  hardware_address allocate()
+  {
+    hardware_address address;
+    stack.pop(address);
+    return address;
+  }
+  hardware_address acquire(hardware_address address)
+  {
+    // Not implemented yet
+    return hardware_address();
+  }
+  void release(hardware_address address)
+  {
+    stack.push(address);
+  }
+};
+
+memory &
+memory::get_main()
+{
+  static char main[sizeof(main_memory)];
+  return reinterpret_cast<kiapi::kernel::memory::memory &>(main);
+}
+
+class dma_memory : memory
+{
+  static const size_t _page_size = 128*1024;
+  // On most system it should be 96. Linear search should be sufficient
+  static const size_t pages = (DMA_END - DMA_START)/_page_size;
+  std::atomic<unsigned char> allocated[pages];
+  std::atomic<unsigned char> &page (hardware_address address)
+  {
+    return allocated[(address.ptr - DMA_START)/_page_size];
+  }
+public:
+  size_t page_size()
+  {
+    return _page_size;
+  }
+  hardware_address allocate()
+  {
+    for (size_t i = 0; i < pages; i++)
+      {
+	unsigned char free = 0, occupied = 1;
+	if (allocated[i].compare_exchange_strong(free, occupied))
+	  {
+	    return (int)(DMA_START+_page_size*i);
+	  }
+      }
+    return hardware_address();
+  }
+  hardware_address acquire(hardware_address address)
+  {
+    page(address) += 1;
+    return address;
+  }
+  void release(hardware_address address)
+  {
+    page(address) -= 1;
+  }
+};
+
+memory &
+memory::get_dma()
+{
+  static char dma[sizeof(dma_memory)];
+  return reinterpret_cast<memory &>(dma);
+}
+
+class page_directory
+{
+  struct page_directory_entry
+  {
+  private:
+    int value;
+    static const int address_mask = 0xFFFFFC00;
+  public:
+    hardware_address address()
+    {
+      return hardware_address(value & address_mask);
+    }
+    void address(hardware_address address)
+    {
+      value = (value & ~address_mask) | (address.ptr & address_mask);
+    }
+  } entries[1024];
+public:
+
+};
+
+// virtual_memory
 
 struct virtual_memory::vm
 {
-  class compare_free_regions
+  struct region;
+  typedef page_allocator<region> reg_pa;
+  typedef std::multimap<size_t, region *, std::less<size_t>, reg_pa> regions_by_size_t;
+  typedef std::map<void *, region *, std::greater<void *>, reg_pa> regions_by_start_t;
+  struct region
   {
-  public:
-    bool operator()(const free_space_block &a, const free_space_block &b)
-    {
-      return a.memory_map < b.memory_map;
-    }
+    void *start;
+    size_t size;
   };
-
-  class compare_cache
-  {
-  public:
-    bool operator()(const free_space_block &a, const free_space_block &b)
-    {
-      if(a.memory_map == NULL || b.memory_map == NULL)
-	return a.length < b.length;
-      else
-	return a.length < b.length ||
-	  (a.length == b.length && a.memory_map < b.memory_map);
-    }
-  };
-  typedef std::set<free_space_block, compare_free_regions, vm_allocator<free_space_block> > free_regions_type;
-  free_regions_type free_regions;
-  typedef std::set<free_space_block, compare_cache, vm_allocator<free_space_block> > cache_type;
-  cache_type cache;
+  regions_by_size_t regions_by_size;
+  regions_by_start_t regions_by_start;
+  std::atomic_flag vmlock;
+  page_allocator<region> region_allocator;
+  hardware_address page_directory;
 };
+
+virtual_memory::virtual_memory() {}
+virtual_memory::virtual_memory(const virtual_memory &) {}
+virtual_memory::virtual_memory(virtual_memory::vm *vm)
+{
+  this->priv = vm;
+}
 
 size_t
 virtual_memory::page_size() const
 {
-  return 0x1000;
+  return 4096;
 }
 
 void *
 virtual_memory::reserve(size_t size)
 {
-  free_space_block block = {NULL, size};
-  vm::cache_type::iterator iter = priv->cache.lower_bound(block);
-  if(iter != priv->cache.end())
+  void *page;
+  // Spinlock. Should be in global procesor lock
+  while(priv->vmlock.test_and_set());
+  auto it = priv->regions_by_size.lower_bound(size);
+  if (it != priv->regions_by_size.end())
     {
-      void *addr = iter->memory_map;
-      if(iter->length > size)
+      auto reg = (*it).second;
+      priv->regions_by_size.erase(it);
+      if (size == reg->size)
 	{
-	  priv->free_regions.erase(*iter);
-	  priv->cache.erase(iter);
+	  priv->regions_by_start.erase(reg->start);
+	  page = reg->start;
+	  priv->region_allocator.deallocate(reg, 1);
 	}
       else
 	{
-	  free_space_block tmp = *iter;
-	  tmp.memory_map = (void *)((int)tmp.memory_map + size * 0x1000);
-	  tmp.length -= size;
-	  priv->cache.erase(iter);
-	  priv->cache.insert(tmp);
+	  page = (void *)((char *)reg->start + reg->size - size);
+	  reg->size -= size;
+	  typedef std::pair<size_t, vm::region *> srpair;
+	  priv->regions_by_size.insert(srpair(reg->size, reg));
 	}
-      return addr;
     }
-  return NULL;
+  else
+    {
+      page = NULL;
+    }
+  priv->vmlock.clear();
+  return page;
 }
 
 void *
-virtual_memory::reserve(void *place, size_t size)
+virtual_memory::reserve(void *start, size_t size)
 {
-  free_space_block block = {place, NULL};
-  vm::free_regions_type::iterator iter = priv->free_regions.lower_bound(block);
-  if(iter != priv->free_regions.end())
+  void *page;
+  // Spinlock. Should be in global procesor lock
+  while(priv->vmlock.test_and_set());
+  auto it = priv->regions_by_start.lower_bound(start);
+  if (it != priv->regions_by_start.end())
     {
-      free_space_block &fsb = const_cast<free_space_block &>(*iter);
-      if(fsb.memory_map == place)
+      auto reg = (*it).second;
+
+      if ((char *)reg->start + reg->size <= (char *)start + size)
 	{
-	  if (fsb.length > size)
+	  auto range = priv->regions_by_size.equal_range(size);
+	  for(auto id = range.first; id != range.second; id++)
 	    {
-	      priv->cache.erase(fsb);
-	      if(fsb.length == size)
+	      if((*id).second == reg)
 		{
-		  priv->free_regions.erase(iter);
+		  priv->regions_by_size.erase(id);
+		  break;
 		}
-	      else if (fsb.length > size)
-		{
-		  fsb.memory_map = (void *)((int)fsb.memory_map + 0x1000 * size);
-		  fsb.length -= size;
-		  priv->cache.insert(fsb);
-		}
-	      return place;
+	    }
+	  if (reg->start == start && reg->size == size)
+	    {
+	      priv->regions_by_start.erase(it);
+	      priv->region_allocator.deallocate(reg, 1);	      
+	    }
+	  else if (reg->start == start)
+	    {
+	      priv->regions_by_start.erase(it);
+	      reg->start = (void *)((char *)reg->start + size);
+	      reg->size -= size;
+	      typedef std::pair<size_t, vm::region *> srpair;
+	      priv->regions_by_size.insert(srpair(reg->size, reg));
+	    }
+	  else if ((char *)reg->start + reg->size == (char *)start + size)
+	    {
+	      reg->size -= size;
+	      typedef std::pair<size_t, vm::region *> srpair;
+	      priv->regions_by_size.insert(srpair(reg->size, reg));
+	    }
+	  else
+	    {
+	      typedef std::pair<size_t, vm::region *> sirpair;
+	      typedef std::pair<void *, vm::region *> strpair;
+	      auto nreg = priv->region_allocator.allocate(1);
+	      nreg->start = (void *)((char *)start + size);
+	      nreg->size = (size_t)reg->start+reg->size - (size_t)nreg->start;
+	      reg->size = (size_t)start - (size_t)reg->size;
+	      priv->regions_by_size.insert(sirpair(nreg->size, nreg));
+	      priv->regions_by_size.insert(sirpair(reg->size, reg));
+	      priv->regions_by_start.insert(strpair(nreg->start, nreg));
 	    }
 	}
-      else if ((int)fsb.memory_map + fsb.length * 0x1000 ==
-	       (int)place + size * 0x1000)
+      else
 	{
-	  priv->cache.erase(fsb);
-	  fsb.length -= size;
-	  priv->cache.insert(fsb);
-	  return place;
-	}
-      else if ((int)fsb.memory_map + fsb.length * 0x1000 >
-	       (int)place + size * 0x1000)
-	{
-	  priv->cache.erase(fsb);
-	  fsb.length = ((int)place - (int)fsb.memory_map)/0x1000;
-	  priv->cache.insert(fsb);
-	  free_space_block nblock = {
-	    (void *)((int)place + size * 0x1000),
-	    (((int)fsb.memory_map + fsb.length * 0x1000) -
-	     ((int)place + size * 0x1000))
-	  };
-	  priv->cache.insert(nblock);
-	  priv->free_regions.insert(nblock);
+	  page = NULL;
 	}
     }
-  return NULL;
+  else
+    {
+      page = NULL;
+    }
+  priv->vmlock.clear();
+  return page;
 }
 
 void
 virtual_memory::map(void *, hardware_address, size_t)
 {
-
 }
 
 void
 virtual_memory::unmap(void *, size_t)
 {
-
 }
 
 hardware_address
 virtual_memory::lookup(void *) const
 {
-
+  return hardware_address();
 }
 
-static virtual_memory *_virtual_memory;
+void
+virtual_memory::use()
+{
+  asm("movl %0, %%cr3"
+      : 
+      : "r" (this->priv->page_directory)
+      : "memory" );
+}
+
 virtual_memory &
 virtual_memory::get_kernel()
 {
-  return *_virtual_memory;
-}
-
-void
-hardware_address::acquire()
-{
-  if (this->ptr > DMA_END)
-    {
-      memory::get_main().acquire(*this);
-    }
-  else if (this->ptr > DMA_START)
-    {
-      memory::get_drm().acquire(*this);
-    }
-}
-
-void
-hardware_address::release()
-{
-  if (this->ptr > DMA_END)
-    {
-      memory::get_main().release(*this);
-    }
-  else if (this->ptr > DMA_START)
-    {
-      memory::get_drm().release(*this);
-    }
+  static char kernel[sizeof(virtual_memory)];
+  return reinterpret_cast<virtual_memory &>(kernel);
 }
 
 bool
 kiapi::kernel::memory::init(multiboot_info *info)
 {
-  long eom = 0xC0000000 + DMA_END;
-  // Initialize page stack
-  _page_stack = reinterpret_cast<atomic_stack<hardware_address> *>(eom);
-  new (_page_stack) atomic_stack<hardware_address>();
-  eom += sizeof(atomic_stack<hardware_address>);
-  if (eom % 4 != 0) // Align 4
-    eom += 4 - (eom % 4);
-  // Init main memory
-  _main = reinterpret_cast<memory *>(eom);
-  new (_main) main_memory();
-  eom += sizeof(main_memory);
-  if (eom % 4 != 0) // Align 4
-    eom += 4 - (eom % 4);
-  // Initialize 'real allocator'
-  _rallocator = eom;
-  typedef real_allocator<std::_Rb_tree_node<free_space_block> > ralloc;
-  new (_rallocator) ralloc();
-  eom += sizeof(*_rallocator);
-  _rallocator->feed(reinterpret_cast<ralloc::node>(eom),
-		    (0x2000 - eom % 0x1000)/sizeof(ralloc::node));
-  eom = eom & ~(0x1000 - 1) + 0x2000;
-  // Initialize page blocks
-  _page_blocks = reinterpret_cast<page_block **>(eom);
-  eom += 0x1000;
-  for(int i = 0; i < 1024, i++)
-    _page_blocks[i] = NULL;
-  _page_blocks[(eom + 0x1000) / 0x400000]
-    = reinterpret_cast<page_block *>(eom);
-  for(int i = 0; i < 1024, i++)
-    _page_blocks[(eom + 0x1000) / 0x400000]->ref[i] = 0;
-  eom += 0x1000;
-  // Fill the table
-  
+  atomic_stack<multiboot_info *> a;
+  a.push(info);
   return true;
 }
