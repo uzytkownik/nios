@@ -1,7 +1,7 @@
 #pragma once
 
 #include <kernel/memory-arch.hh>
-#include <utils/atomic/stack.hh>
+#include <utils/atomic/_stack.hh>
 
 namespace kiapi
 {

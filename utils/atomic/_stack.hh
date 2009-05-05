@@ -1,6 +1,6 @@
 #pragma once
 
-#include <kiapi/kernel/memory/page_allocator.hh>
+#include <kiapi/kernel/memory/_page_allocator.hh>
 #include <utils/atomic/base_stack.hh>
 
 namespace utils
