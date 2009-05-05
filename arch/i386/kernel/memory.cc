@@ -1,3 +1,5 @@
+/*#include "kiapi/kernel/memory/memory.hh"
+#include "utils/atomic/stack.hh"
 #include <new>
 #include <set>
 #include <map>
@@ -10,147 +12,6 @@ template<size_t size>
 base_atomic_stack<dummy> real_page_allocator<size>::free_pages;
 template<size_t size>
 std::atomic_flag real_page_allocator<size>::feed_lock;
-
-template<typename T>
-class atomic_stack
-{
-  base_atomic_stack<T> stack;
-  typedef typename base_atomic_stack<T>::bucket bucket;
-  page_allocator<bucket> bucket_allocator;
-public:
-  bool pop(T &__p)
-  {
-    bucket *b = stack.pop();
-    if(__builtin_expect(b == NULL, false))
-      {
-	return false;
-      }
-    else
-      {
-	__p = b->value;
-	bucket_allocator.deallocate(b, 1);
-	return true;
-      }
-  }
-  void push(T &__p)
-  {
-    bucket *b = bucket_allocator.allocate(1);
-    b->value = __p;
-  }
-};
-
-template<typename T>
-class atomic_stack<T *>
-{
-  base_atomic_stack<T *> stack;
-  typedef typename base_atomic_stack<T *>::bucket bucket;
-  page_allocator<bucket> bucket_allocator;
-public:
-  bool pop(T *&__p)
-  {
-    bucket *b = stack.pop();
-    if (__builtin_expect(b == NULL, false))
-      {
-	__p = NULL;
-	return false;
-      }
-    else
-      {
-	__p = b->value;
-	bucket_allocator.deallocate(b);
-	return true;
-      }
-  }
-  T *pop()
-  {
-    bucket *b = stack.pop();
-    T *t = b->value;
-    bucket_allocator.deallocate(b);
-    return t;
-  }
-  void push(T *__p)
-  {
-    bucket *b = bucket_allocator.allocate(1);
-    b->value = __p;
-  }
-};
-
-class main_memory : memory
-{
-  atomic_stack<hardware_address> stack;
-public:
-  size_t page_size()
-  {
-    return 4096;
-  }
-  hardware_address allocate()
-  {
-    hardware_address address;
-    stack.pop(address);
-    return address;
-  }
-  hardware_address acquire(hardware_address address)
-  {
-    // Not implemented yet
-    return hardware_address();
-  }
-  void release(hardware_address address)
-  {
-    stack.push(address);
-  }
-};
-
-memory &
-memory::get_main()
-{
-  static char main[sizeof(main_memory)];
-  return reinterpret_cast<kiapi::kernel::memory::memory &>(main);
-}
-
-class dma_memory : memory
-{
-  static const size_t _page_size = 128*1024;
-  // On most system it should be 96. Linear search should be sufficient
-  static const size_t pages = (DMA_END - DMA_START)/_page_size;
-  std::atomic<unsigned char> allocated[pages];
-  std::atomic<unsigned char> &page (hardware_address address)
-  {
-    return allocated[(address.ptr - DMA_START)/_page_size];
-  }
-public:
-  size_t page_size()
-  {
-    return _page_size;
-  }
-  hardware_address allocate()
-  {
-    for (size_t i = 0; i < pages; i++)
-      {
-	unsigned char free = 0, occupied = 1;
-	if (allocated[i].compare_exchange_strong(free, occupied))
-	  {
-	    return (int)(DMA_START+_page_size*i);
-	  }
-      }
-    return hardware_address();
-  }
-  hardware_address acquire(hardware_address address)
-  {
-    page(address) += 1;
-    return address;
-  }
-  void release(hardware_address address)
-  {
-    page(address) -= 1;
-  }
-};
-
-memory &
-memory::get_dma()
-{
-  static char dma[sizeof(dma_memory)];
-  return reinterpret_cast<memory &>(dma);
-}
 
 class page_directory
 {
@@ -345,3 +206,4 @@ kiapi::kernel::memory::init(multiboot_info *info)
   a.push(info);
   return true;
 }
+*/

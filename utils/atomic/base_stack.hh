@@ -7,7 +7,7 @@ namespace utils
   namespace atomic
   {
     template<typename T>
-    class basic_stack
+    class base_stack
     {
     public:
       struct bucket
@@ -45,7 +45,7 @@ namespace utils
 	  {
 	    last->next = head.load();
 	  }
-	while(head.compare_exchange_strong(last->next, first))
+	while(head.compare_exchange_strong(last->next, first));
       }
     };
   }

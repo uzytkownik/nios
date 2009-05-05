@@ -1,6 +1,9 @@
 #pragma once
 
+#include <algorithm>
 #include <utils/atomic/base_stack.hh>
+#include <kiapi/kernel/memory/hardware_address.hh>
+#include <kiapi/kernel/memory/virtual_memory.hh>
 
 namespace kiapi
 {
@@ -8,36 +11,13 @@ namespace kiapi
   {
     namespace memory
     {
-      template<size_t size>
-      class real_page_allocator
+      template<size_t size, typename memory>
+      class _real_page_allocator
       {
 	struct dummy {};
-	static base_atomic_stack<dummy> free_pages;
-	typedef typename base_atomic_stack<dummy>::bucket bucket;
+	static utils::atomic::base_stack<dummy> free_pages;
+	typedef typename utils::atomic::base_stack<dummy>::bucket bucket;
 	static std::atomic_flag feed_lock;
-	static void feed(void *ptr, size_t length)
-	{
-	  char *buckets = reinterpret_cast<char *>(ptr);
-	  size_t s = std::min(size, sizeof(bucket));
-	  bucket *next = NULL;
-	  for(size_t i = 0; i < length - s + 1; i += s)
-	    {
-	      bucket *b = reinterpret_cast<bucket *>(&buckets[i]);
-	      b->next = next;
-	      next = b;
-	    }
-	  free_pages.feed(next, reinterpret_cast<bucket *>(buckets));
-	}
-	static void feed()
-	{
-	  memory &main = memory::get_main();
-	  hardware_address address = main.allocate();
-	  size_t page_size = main.page_size();
-	  virtual_memory &kvmem = virtual_memory::get_kernel();
-	  void *ptr = kvmem.reserve(page_size);
-	  kvmem.map(ptr, address, page_size);
-	  feed(ptr, page_size);
-	}
       public:
 	static void *allocate()
 	{
@@ -46,11 +26,7 @@ namespace kiapi
 	      bucket *b = free_pages.pop();
 	      if(__builtin_expect(b != NULL, true))
 		return b;
-	      if(__builtin_expect(!feed_lock.test_and_set(), true))
-		{
-		  feed();
-		  feed_lock.clear();
-		}
+	      std::__throw_bad_alloc();
 	    }
 	  while(true);
 	}
@@ -60,10 +36,10 @@ namespace kiapi
 	}
       };
 
-      template<typename T>
-      class page_allocator
+      template<typename T, typename memory>
+      class _page_allocator
       {
-	typedef real_page_allocator<sizeof(T)> rpage_allocator;
+	typedef _real_page_allocator<sizeof(T), memory> rpage_allocator;
       public:
 	typedef size_t    size_type;
 	typedef ptrdiff_t difference_type;
@@ -76,13 +52,13 @@ namespace kiapi
 	template<typename T1>
 	struct rebind
 	{
-	  typedef page_allocator<T1> other;
+	  typedef _page_allocator<T1, memory> other;
 	};
 
-	page_allocator() throw() { }
-	page_allocator(const page_allocator &) throw() { }
+	_page_allocator() throw() { }
+	_page_allocator(const _page_allocator &) throw() { }
 	template<typename T1>
-	page_allocator(const page_allocator<T1>) throw() { }
+	_page_allocator(const _page_allocator<T1, memory>) throw() { }
 
 	pointer address(reference __x) const { return &__x; }
 	const_pointer address(const_reference __x) const { return &__x; }
@@ -120,12 +96,12 @@ namespace kiapi
 	  __p->~T();
 	}
 
-	inline bool operator==(const page_allocator &)
+	inline bool operator==(const _page_allocator &)
 	{
 	  return true;
 	}
 
-	inline bool operator!=(const page_allocator &)
+	inline bool operator!=(const _page_allocator &)
 	{
 	  return false;
 	}

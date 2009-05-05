@@ -1,5 +1,8 @@
 #pragma once
 
+#include <string.h> //size_t
+#include <kiapi/kernel/memory/hardware_address.hh>
+
 namespace kiapi
 {
   namespace kernel

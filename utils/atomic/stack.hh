@@ -1,18 +1,18 @@
 #pragma once
 
-#include <kiapi/memory/page_allocator.hh>
-#include <kiapi/memory/basic_stack.hh>
+#include <kiapi/kernel/memory/page_allocator.hh>
+#include <utils/atomic/base_stack.hh>
 
 namespace utils
 {
   namespace atomic
   {
-    template<typename T>
-    class atomic_stack
+    template<typename T, typename memory>
+    class _stack
     {
-      base_atomic_stack<T> stack;
-      typedef typename base_atomic_stack<T>::bucket bucket;
-      page_allocator<bucket> bucket_allocator;
+      base_stack<T> stack;
+      typedef typename base_stack<T>::bucket bucket;
+      kiapi::kernel::memory::_page_allocator<bucket, memory> bucket_allocator;
     public:
       bool pop(T &__p)
       {
