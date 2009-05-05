@@ -1,6 +1,6 @@
-#include "kernel/memory-arch.hh"
-
 #pragma once
+
+#include <kernel/memory_arch.hh>
 
 namespace kiapi
 {

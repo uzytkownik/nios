@@ -1,6 +1,6 @@
 #pragma once
 
-#include <kernel/memory-arch.hh>
+#include <kernel/memory_arch.hh>
 #include <utils/atomic/_stack.hh>
 
 namespace kiapi
