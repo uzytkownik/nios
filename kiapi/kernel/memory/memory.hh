@@ -22,7 +22,7 @@
 #pragma once
 
 #include <kernel/memory_arch.hh>
-#include <utils/atomic/_stack.hh>
+#include <utils/atomic/stack.hh>
 
 namespace kiapi
 {
@@ -32,7 +32,7 @@ namespace kiapi
     {
       class memory
       {
-	static utils::atomic::_stack<hardware_address, memory> stack;
+	static utils::atomic::stack<hardware_address, memory> stack;
       public:
 	static const int page_size = memory_page_size;
 	hardware_address

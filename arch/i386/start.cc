@@ -19,14 +19,14 @@
  * Boston, MA  02110-1301  USA
  */
 
-#include <kiapi/kernel/memory.hh>
+/*#include <kiapi/kernel/memory/memory.hh>
 
 extern "C" void kstart (unsigned long magic, struct multiboot_info *info);
 
 void
 kstart (unsigned long magic, struct multiboot_info *info)
 {
-  kiapi::kernel::memory::init(info);
   while(1)
     __asm__("hlt");
 }
+*/
